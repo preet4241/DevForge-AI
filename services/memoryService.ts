@@ -1,5 +1,6 @@
 
 import { IdbStorage } from './idbStorage';
+import { getEmbedding } from './geminiService';
 
 export type MemoryType = 'rule' | 'pattern' | 'anti-pattern';
 
@@ -10,6 +11,8 @@ export interface MemoryItem {
   domain?: string; 
   timestamp: number;
   useCount: number;
+  source?: string;
+  embedding?: number[]; // Vector embedding for RAG
 }
 
 export interface LearningLog {
@@ -18,12 +21,20 @@ export interface LearningLog {
   summary: string;
 }
 
+export interface Badge {
+  id: string;
+  name: string;
+  icon: string; // Lucide icon name
+  description: string;
+  promptMod: string; // The "Elite Instruction" added to the LLM
+}
+
 export interface AgentStats {
   level: number;
   xp: number;
   maxXp: number;
-  skillCounts: Record<string, number>;
-  badges: string[];
+  skillCounts: Record<string, number>; // e.g., { 'python': 5, 'react': 10 }
+  badges: string[]; // List of Badge IDs
 }
 
 export interface AgentMemoryStore {
@@ -36,47 +47,158 @@ export interface AgentMemoryStore {
   logs?: LearningLog[];
 }
 
-// Fix: Added missing Badge interface exported for AgentDashboard
-export interface Badge {
-  name: string;
-  description: string;
-  icon: string;
-}
-
-// Fix: Added missing AGENT_BADGES mapping exported for AgentDashboard
-export const AGENT_BADGES: Record<string, Badge> = {
-  'Code': { name: 'Code Expert', description: 'Advanced code generation and review.', icon: 'Code' },
-  'Zap': { name: 'Efficiency Pro', description: 'Fast task completion.', icon: 'Zap' },
-  'Shield': { name: 'Security Auditor', description: 'Deep vulnerability scanning.', icon: 'Shield' },
-  'Hexagon': { name: 'Architecture Master', description: 'Complex system design.', icon: 'Hexagon' },
-  'Star': { name: 'Visionary', description: 'Innovative product leadership.', icon: 'Star' }
-};
-
 const STORAGE_KEY = 'devforge_memory_v1';
 const IDB_RULES_KEY = 'devforge_vector_memory';
 
+// --- BADGE DEFINITIONS ---
+export const AGENT_BADGES: Record<string, Badge> = {
+  'python_master': {
+    id: 'python_master',
+    name: 'Python Cobra',
+    icon: 'Code',
+    description: 'Built 5+ Python backends.',
+    promptMod: 'You are a Python Grandmaster. Use advanced typing, decorators, context managers, and efficient list comprehensions. Prefer Pydantic models.'
+  },
+  'react_wizard': {
+    id: 'react_wizard',
+    name: 'React Wizard',
+    icon: 'Zap',
+    description: 'Created 5+ React interfaces.',
+    promptMod: 'You are a React Specialist. Always use custom hooks, efficient memoization, and atomic component structure.'
+  },
+  'security_guardian': {
+    id: 'security_guardian',
+    name: 'Iron Guardian',
+    icon: 'Shield',
+    description: 'Conducted 10+ Security Audits.',
+    promptMod: 'Your paranoia level is maxed. Assume every input is an attack. Suggest OWASP Top 10 mitigations for every endpoint.'
+  },
+  'architect_prime': {
+    id: 'architect_prime',
+    name: 'Architect Prime',
+    icon: 'Hexagon',
+    description: 'Designed 5+ System Architectures.',
+    promptMod: 'You see the matrix. Focus on microservices, event-driven patterns, and infinite scalability.'
+  },
+  'veteran': {
+    id: 'veteran',
+    name: 'Veteran',
+    icon: 'Star',
+    description: 'Reached Level 5.',
+    promptMod: 'You are highly experienced. Be concise, authoritative, and extremely technically accurate.'
+  }
+};
+
 const createEmptyMemory = (agentId: string): AgentMemoryStore => ({
-  agentId, isEnabled: true, stats: { level: 1, xp: 0, maxXp: 1000, skillCounts: {}, badges: [] },
-  rules: [], patterns: [], antiPatterns: []
+  agentId, 
+  isEnabled: true, 
+  stats: {
+    level: 1,
+    xp: 0,
+    maxXp: 1000,
+    skillCounts: {},
+    badges: []
+  },
+  rules: [], 
+  patterns: [], 
+  antiPatterns: []
 });
 
+const INITIAL_MEMORY: Record<string, AgentMemoryStore> = {
+  Aarav: createEmptyMemory('Aarav'),
+  Sanya: createEmptyMemory('Sanya'),
+  Arjun: createEmptyMemory('Arjun'),
+  Rohit: createEmptyMemory('Rohit'),
+  Vikram: createEmptyMemory('Vikram'),
+  Neha: createEmptyMemory('Neha'),
+  Kunal: createEmptyMemory('Kunal'),
+  Pooja: createEmptyMemory('Pooja'),
+  Cipher: createEmptyMemory('Cipher'),
+  Shadow: createEmptyMemory('Shadow'),
+  // Expanded Team...
+  Priya: createEmptyMemory('Priya'),
+  Riya: createEmptyMemory('Riya'),
+  Aditya: createEmptyMemory('Aditya'),
+  Meera: createEmptyMemory('Meera'),
+  Karan: createEmptyMemory('Karan'),
+  Ananya: createEmptyMemory('Ananya'),
+  Dev: createEmptyMemory('Dev'),
+  Aryan: createEmptyMemory('Aryan'),
+  Zara: createEmptyMemory('Zara'),
+  Kabir: createEmptyMemory('Kabir'),
+  Ishan: createEmptyMemory('Ishan'),
+  Naina: createEmptyMemory('Naina'),
+  Vivaan: createEmptyMemory('Vivaan'),
+  Tara: createEmptyMemory('Tara'),
+  Maya: createEmptyMemory('Maya') // Live Preview Agent
+};
+
+// --- VECTOR MATH ---
+function cosineSimilarity(vecA: number[], vecB: number[]) {
+  let dotProduct = 0;
+  let magnitudeA = 0;
+  let magnitudeB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    magnitudeA += vecA[i] * vecA[i];
+    magnitudeB += vecB[i] * vecB[i];
+  }
+  return dotProduct / (Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB));
+}
+
+// --- CONTROLLERS ---
+
 export class MemoryController {
-  private static memoryCache: Record<string, AgentMemoryStore> = {};
+  
+  // Cache for UI sync
+  private static memoryCache: Record<string, AgentMemoryStore> = INITIAL_MEMORY;
   private static initialized = false;
 
   static async initialize() {
     if (this.initialized) return;
+    
+    // 1. Load Stats/XP from LocalStorage (Sync/Fast)
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      Object.keys(parsed).forEach(k => this.memoryCache[k] = parsed[k]);
+      // Merge stats into cache
+      Object.keys(parsed).forEach(key => {
+        if (parsed[key]?.stats) {
+          if (!this.memoryCache[key]) this.memoryCache[key] = createEmptyMemory(key);
+          this.memoryCache[key].stats = parsed[key].stats;
+          this.memoryCache[key].isEnabled = parsed[key].isEnabled;
+        }
+      });
     }
+
+    // 2. Load Content from IndexedDB (Unlimited Capacity)
+    try {
+      const vectorData = await IdbStorage.get<Record<string, MemoryItem[]>>(IDB_RULES_KEY) || {};
+      
+      Object.keys(vectorData).forEach(agentId => {
+        if (!this.memoryCache[agentId]) this.memoryCache[agentId] = createEmptyMemory(agentId);
+        const items = vectorData[agentId];
+        
+        this.memoryCache[agentId].rules = items.filter(i => i.type === 'rule');
+        this.memoryCache[agentId].patterns = items.filter(i => i.type === 'pattern');
+        this.memoryCache[agentId].antiPatterns = items.filter(i => i.type === 'anti-pattern');
+      });
+    } catch (e) {
+      console.error("Failed to load vector memory from IDB", e);
+    }
+
     this.initialized = true;
   }
 
+  // --- SYNC ACCESSORS FOR UI (Fast) ---
+  
   static getAgentMemory(agentId: string): AgentMemoryStore {
-    if (!this.initialized) this.initialize();
-    if (!this.memoryCache[agentId]) this.memoryCache[agentId] = createEmptyMemory(agentId);
+    // If not initialized, trigger init but return default immediately to not block UI
+    if (!this.initialized) this.initialize(); 
+    
+    if (!this.memoryCache[agentId]) {
+      this.memoryCache[agentId] = createEmptyMemory(agentId);
+    }
     return this.memoryCache[agentId];
   }
 
@@ -88,69 +210,237 @@ export class MemoryController {
   }
 
   static async clearMemory(agentId: string) {
-    this.memoryCache[agentId] = createEmptyMemory(agentId);
+    const mem = this.getAgentMemory(agentId);
+    mem.rules = [];
+    mem.patterns = [];
+    mem.antiPatterns = [];
+    
+    // Persist clear to IDB
+    const vectorData = await IdbStorage.get<Record<string, MemoryItem[]>>(IDB_RULES_KEY) || {};
+    vectorData[agentId] = [];
+    await IdbStorage.set(IDB_RULES_KEY, vectorData);
+    
+    // Don't clear stats
     this.saveStats();
   }
 
+  // --- RAG RETRIEVAL (Async) ---
+
   static async retrieveRelevantContext(agentId: string, query: string): Promise<string> {
+    if (!this.initialized) await this.initialize();
+    
     const mem = this.getAgentMemory(agentId);
-    if (!mem.isEnabled) return "";
-    let context = `\n[NEURAL MEMORY: ${agentId}]\n`;
-    const items = [...mem.rules, ...mem.patterns].slice(0, 5);
-    items.forEach(i => context += `- [${i.type}] ${i.content}\n`);
+    const globalContext = GlobalMemoryController.retrieveContext(); // keep global simple for now
+    
+    let context = globalContext;
+
+    // Inject Badges/Levels
+    if (mem.stats.badges.length > 0) {
+        context += `\n[CAREER STATUS: Level ${mem.stats.level}]\n`;
+        context += `EARNED BADGES (ACTIVE BUFFS):\n`;
+        mem.stats.badges.forEach(bid => {
+            const badge = AGENT_BADGES[bid];
+            if (badge) context += `- ${badge.name}: ${badge.promptMod}\n`;
+        });
+    }
+
+    if (!mem.isEnabled) return context;
+
+    context += `\n\n[NEURAL MEMORY: ${agentId.toUpperCase()}]\n`;
+    
+    // Perform Vector Search
+    const relevantItems = await this.vectorSearch(agentId, query);
+    
+    if (relevantItems.length > 0) {
+      context += `RELEVANT LEARNED RULES (RAG):\n`;
+      relevantItems.forEach(item => {
+        context += `- [${item.type.toUpperCase()}] ${item.content} (Confidence: ${(item.similarity * 100).toFixed(0)}%)\n`;
+      });
+    } else {
+      context += `(No relevant specific memories found for this context)\n`;
+    }
+
     return context;
   }
+
+  // --- INTERNAL LOGIC ---
 
   private static saveStats() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.memoryCache));
   }
 
+  private static async vectorSearch(agentId: string, query: string, topK: number = 5): Promise<(MemoryItem & { similarity: number })[]> {
+    // 1. Get embedding for query
+    const queryEmbedding = await getEmbedding(query);
+    if (!queryEmbedding) return []; // Fallback if embedding fails
+
+    // 2. Get all items for this agent from IDB (Unlimited storage source)
+    // Note: In a real production app with millions of vectors, we'd use a server-side vector DB.
+    // For "Unlimited" client-side, IDB is fine up to ~50k-100k items before it gets slow, which is plenty.
+    const vectorData = await IdbStorage.get<Record<string, MemoryItem[]>>(IDB_RULES_KEY) || {};
+    const agentItems = vectorData[agentId] || [];
+
+    // 3. Calculate Cosine Similarity
+    const scoredItems = agentItems
+      .filter(item => item.embedding && item.embedding.length > 0)
+      .map(item => ({
+        ...item,
+        similarity: cosineSimilarity(queryEmbedding, item.embedding!)
+      }));
+
+    // 4. Sort and Slice
+    return scoredItems
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, topK);
+  }
+
   static addExperience(agentId: string, amount: number, skillsUsed: string[]) {
-    const mem = this.getAgentMemory(agentId);
-    mem.stats.xp += amount;
-    if (mem.stats.xp >= mem.stats.maxXp) {
-      mem.stats.level += 1;
-      mem.stats.xp -= mem.stats.maxXp;
-      mem.stats.maxXp = Math.floor(mem.stats.maxXp * 1.5);
-    }
-    this.saveStats();
+      // Sync update cache
+      const mem = this.getAgentMemory(agentId);
+      
+      mem.stats.xp += amount;
+      
+      if (mem.stats.xp >= mem.stats.maxXp) {
+          mem.stats.level += 1;
+          mem.stats.xp = mem.stats.xp - mem.stats.maxXp;
+          mem.stats.maxXp = Math.floor(mem.stats.maxXp * 1.5);
+          
+          if (mem.stats.level >= 5 && !mem.stats.badges.includes('veteran')) {
+              mem.stats.badges.push('veteran');
+          }
+      }
+
+      skillsUsed.forEach(skill => {
+          const lowerSkill = skill.toLowerCase();
+          mem.stats.skillCounts[lowerSkill] = (mem.stats.skillCounts[lowerSkill] || 0) + 1;
+
+          if ((lowerSkill.includes('python') || lowerSkill.includes('django') || lowerSkill.includes('flask')) 
+               && mem.stats.skillCounts[lowerSkill] >= 5 
+               && !mem.stats.badges.includes('python_master')) {
+               mem.stats.badges.push('python_master');
+          }
+
+          if ((lowerSkill.includes('react') || lowerSkill.includes('frontend') || lowerSkill.includes('next')) 
+               && mem.stats.skillCounts[lowerSkill] >= 5 
+               && !mem.stats.badges.includes('react_wizard')) {
+               mem.stats.badges.push('react_wizard');
+          }
+      });
+
+      if (agentId === 'Rohit') {
+         mem.stats.skillCounts['design'] = (mem.stats.skillCounts['design'] || 0) + 1;
+         if (mem.stats.skillCounts['design'] >= 5 && !mem.stats.badges.includes('architect_prime')) {
+             mem.stats.badges.push('architect_prime');
+         }
+      }
+
+      // Save Stats Sync
+      this.saveStats();
   }
 
   static async learn(agentId: string, type: MemoryType, content: string) {
-    const mem = this.getAgentMemory(agentId);
+    // 1. Generate Embedding
+    const embedding = await getEmbedding(content);
+    
     const newItem: MemoryItem = {
-      id: Math.random().toString(36).substr(2, 9),
-      type, content: content.trim(), timestamp: Date.now(), useCount: 0
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      type,
+      content: content.trim(),
+      timestamp: Date.now(),
+      useCount: 0,
+      embedding: embedding || []
     };
-    if (type === 'rule') mem.rules.unshift(newItem);
-    else if (type === 'pattern') mem.patterns.unshift(newItem);
-    else mem.antiPatterns.unshift(newItem);
-    this.saveStats();
+
+    // 2. Save to IDB (Async, Unlimited)
+    const vectorData = await IdbStorage.get<Record<string, MemoryItem[]>>(IDB_RULES_KEY) || {};
+    if (!vectorData[agentId]) vectorData[agentId] = [];
+    
+    // Check duplicates
+    if (!vectorData[agentId].some(i => i.content === newItem.content)) {
+        vectorData[agentId].push(newItem);
+        await IdbStorage.set(IDB_RULES_KEY, vectorData);
+        
+        // 3. Update In-Memory Cache for UI
+        const mem = this.getAgentMemory(agentId);
+        if (type === 'rule') mem.rules.unshift(newItem);
+        else if (type === 'pattern') mem.patterns.unshift(newItem);
+        else mem.antiPatterns.unshift(newItem);
+    }
+  }
+
+  // Backward compatibility wrapper for sync usage (returns default full dump from cache)
+  static retrieveContext(agentId: string): string {
+    // This is strictly for fallback or non-RAG simple usage
+    const mem = this.getAgentMemory(agentId);
+    let context = "";
+    mem.rules.forEach(r => context += `- ${r.content}\n`);
+    return context;
   }
 }
 
 export class GlobalMemoryController {
-  private static getGlobalStore() {
-    const s = localStorage.getItem('devforge_global_memory_v1');
-    return s ? JSON.parse(s) : { rules: [], patterns: [], antiPatterns: [], logs: [] };
+  // Keeping global memory simple for now (no RAG) as it's small, but could be upgraded too
+  private static getGlobalStore(): Omit<AgentMemoryStore, 'agentId' | 'stats'> {
+    const stored = localStorage.getItem('devforge_global_memory_v1');
+    return stored ? JSON.parse(stored) : { isEnabled: true, rules: [], patterns: [], antiPatterns: [], logs: [] };
   }
 
-  static learn(type: MemoryType, content: string, domain = 'general') {
-    const s = this.getGlobalStore();
-    s.rules.unshift({ content, domain, timestamp: Date.now() });
-    localStorage.setItem('devforge_global_memory_v1', JSON.stringify(s));
+  private static saveGlobalStore(store: any) {
+    localStorage.setItem('devforge_global_memory_v1', JSON.stringify(store));
+  }
+
+  static learn(type: MemoryType, content: string, domain: string = 'general') {
+    const store = this.getGlobalStore();
+    const newItem: MemoryItem = {
+      id: 'g_' + Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      type,
+      content: content.trim(),
+      domain,
+      timestamp: Date.now(),
+      useCount: 0,
+      source: 'training_chat'
+    };
+
+    let targetArray = type === 'rule' ? store.rules : type === 'pattern' ? store.patterns : store.antiPatterns;
+    if (targetArray.some(item => item.content === newItem.content)) return;
+
+    targetArray.unshift(newItem);
+    if (targetArray.length > 50) targetArray.pop();
+
+    this.saveGlobalStore(store);
   }
 
   static logEvent(summary: string) {
-    const s = this.getGlobalStore();
-    s.logs.unshift({ id: Math.random().toString(), timestamp: Date.now(), summary });
-    localStorage.setItem('devforge_global_memory_v1', JSON.stringify(s));
+    const store = this.getGlobalStore();
+    if (!store.logs) store.logs = [];
+    
+    store.logs.unshift({
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 4),
+      timestamp: Date.now(),
+      summary: summary
+    });
+    
+    if (store.logs.length > 50) store.logs.pop();
+    this.saveGlobalStore(store);
   }
 
-  static retrieveContext() {
-    const s = this.getGlobalStore();
-    return s.rules.length ? `[GLOBAL RULES]: ${s.rules.slice(0,3).map((r:any)=>r.content).join('; ')}` : "";
+  static retrieveContext(): string {
+    const store = this.getGlobalStore();
+    if (!store.isEnabled) return "";
+
+    let context = `\n[GLOBAL SHARED KNOWLEDGE]\n`;
+    if (store.rules.length > 0) {
+      context += `UNIVERSAL RULES:\n`;
+      store.rules.slice(0, 10).forEach(r => context += `- ${r.content} [${r.domain || 'general'}]\n`);
+    }
+    return context;
   }
 
-  static getFullStore() { return this.getGlobalStore(); }
+  static getFullStore() {
+    return this.getGlobalStore();
+  }
+
+  static clear() {
+    localStorage.removeItem('devforge_global_memory_v1');
+  }
 }

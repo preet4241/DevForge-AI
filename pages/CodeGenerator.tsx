@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -50,17 +49,17 @@ const getFileInfo = (fileName: string) => {
 };
 
 const SAMPLE_LOGS = [
-  "🔍 Analyzing neural weights for project consistency...",
-  "📦 Loading dependencies from registry...",
-  "🚀 Initializing sandbox environment...",
-  "✨ Syncing project state...",
-  "✅ Handshake successful.",
-  "🌐 Monitoring active sockets...",
-  "🛡️ Scanning input for adversarial patterns...",
-  "⚠️ Memory context approaching limit...",
-  "🔥 Hot-reload active.",
-  "🐘 DB Client: Persistent session established.",
-  "🧠 Thinking budget allocated: 2048 tokens."
+  "🔍 Analyzing project architecture...",
+  "📦 Installing dependencies: react, lucide-react, jszip...",
+  "🚀 Starting development server on port 3000...",
+  "✨ Compiling module: App.tsx",
+  "✅ Compilation successful. No errors found.",
+  "🌐 Network request: GET /api/v1/user/profile 200 OK",
+  "🛡️ Security audit: No high-severity vulnerabilities detected.",
+  "⚠️ Warning: useEffect in Header.tsx has a missing dependency.",
+  "🔥 HMR (Hot Module Replacement) active.",
+  "🐘 Database connection established.",
+  "🧠 Memory usage stable: 156MB / 512MB"
 ];
 
 // --- Tree Helper Functions ---
@@ -356,7 +355,7 @@ const CodeGenerator = () => {
           time: new Date().toLocaleTimeString(),
           text: SAMPLE_LOGS[Math.floor(Math.random() * SAMPLE_LOGS.length)]
         };
-        setLogs(prev => [...prev, newLog].slice(-50));
+        setLogs(prev => [...prev, newLog].slice(-100)); // Keep last 100 logs
       }, 1500);
     } else {
       setLogs([]);
@@ -435,7 +434,7 @@ const CodeGenerator = () => {
     }
   };
 
-  // --- CRUD OPERATIONS ---
+  // --- REFINED CRUD OPERATIONS ---
 
   const handleCreateRequest = (path: string, type: 'file' | 'folder') => {
       setCreateLocation(path); 
@@ -765,34 +764,35 @@ const CodeGenerator = () => {
                })}
             </div>
             <div className="flex items-center gap-2 px-3 bg-zinc-900 h-full border-l border-zinc-800 shrink-0">
-               <Tooltip content="Back to Chat">
-                 <button onClick={() => navigate('/chat')} className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white transition-colors border border-zinc-700">
+               <Tooltip content="Exit to Chat">
+                 <Button onClick={() => navigate('/chat')} variant="secondary" className="h-8 w-8 p-0">
                     <ArrowLeft size={18} />
-                 </button>
+                 </Button>
                </Tooltip>
-
-               <Tooltip content={isAppRunning ? "Stop Application" : "Run Application"}>
-                  <button 
+               
+               <Tooltip content={isAppRunning ? "Stop Execution" : "Run Application"}>
+                  <Button 
                     onClick={() => setIsAppRunning(!isAppRunning)} 
-                    className={`p-2 rounded-lg transition-all ${isAppRunning ? 'bg-red-600/20 text-red-500 border border-red-500/50' : 'bg-green-600/20 text-green-500 border border-green-500/50'}`}
+                    className={`h-8 w-8 p-0 transition-all ${isAppRunning ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'}`}
                   >
                     {isAppRunning ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
-                  </button>
+                  </Button>
                </Tooltip>
 
                <Tooltip content="Toggle Console">
-                 <button 
+                 <Button 
                    onClick={() => setShowConsole(!showConsole)} 
-                   className={`p-2 rounded-lg border transition-colors ${showConsole ? 'bg-orange-600/20 text-orange-400 border-orange-500/50' : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:text-white'}`}
+                   variant="secondary" 
+                   className={`h-8 w-8 p-0 border border-zinc-700 ${showConsole ? 'bg-zinc-700 text-orange-400' : 'text-zinc-400'}`}
                  >
                     <Terminal size={18} />
-                 </button>
+                 </Button>
                </Tooltip>
 
-               <Tooltip content="Download Full Project ZIP">
-                 <button onClick={handleDownloadZip} className="p-2 rounded-lg bg-orange-600 text-white hover:bg-orange-500 shadow-lg shadow-orange-900/20 transition-all">
+               <Tooltip content="Download ZIP">
+                 <Button onClick={handleDownloadZip} className="h-8 w-8 p-0 bg-orange-600 hover:bg-orange-500">
                     <Download size={18} />
-                 </button>
+                 </Button>
                </Tooltip>
             </div>
          </div>
@@ -846,25 +846,27 @@ const CodeGenerator = () => {
                      <div className="flex items-center gap-2">
                         <Terminal size={12} className="text-orange-500" />
                         <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
-                           Live System Logs {isAppRunning && <span className="ml-2 inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+                           Live Console {isAppRunning && <span className="ml-2 inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
                         </span>
                      </div>
                      <div className="flex items-center gap-2">
                         <button onClick={() => setLogs([])} className="text-[10px] text-zinc-500 hover:text-zinc-300 uppercase tracking-wider font-bold">Clear</button>
-                        <button onClick={() => setShowConsole(false)} className="text-zinc-500 hover:text-white p-1"><X size={14} /></button>
+                        <button onClick={() => setShowConsole(false)} className="text-zinc-500 hover:text-white"><X size={14} /></button>
                      </div>
                   </div>
-                  <div className="flex-1 overflow-y-auto p-4 font-mono text-xs text-zinc-300 custom-scrollbar bg-black/40">
+                  <div className="flex-1 overflow-y-auto p-4 font-mono text-xs text-zinc-300 custom-scrollbar bg-black/30">
                      {!isAppRunning && logs.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-zinc-600 space-y-2">
-                           <Terminal size={24} className="opacity-20" />
-                           <p className="italic">No active logs. Start the application to see runtime output.</p>
+                           <div className="p-3 rounded-full bg-zinc-900 border border-zinc-800">
+                              <Terminal size={24} className="opacity-20" />
+                           </div>
+                           <p className="italic">No logs yet. Run the app to see live output.</p>
                         </div>
                      ) : (
                         <div className="space-y-1">
                            {logs.map((log) => (
                               <div key={log.id} className="flex gap-3 animate-fade-in group">
-                                 <span className="text-zinc-600 shrink-0 select-none">[{log.time}]</span>
+                                 <span className="text-zinc-600 shrink-0 select-none group-hover:text-zinc-500 transition-colors">[{log.time}]</span>
                                  <span className="break-all">{log.text}</span>
                               </div>
                            ))}

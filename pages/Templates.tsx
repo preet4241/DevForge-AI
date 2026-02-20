@@ -18,68 +18,7 @@ interface Template {
   features: string[];
 }
 
-const TEMPLATES: Template[] = [
-  {
-    id: 'ecommerce-starter',
-    title: 'Modern E-commerce Store',
-    description: 'Full-featured online store with product catalog, shopping cart, checkout flow, and admin dashboard.',
-    type: 'web',
-    icon: ShoppingCart,
-    stack: ['Next.js', 'Tailwind', 'Stripe', 'PostgreSQL'],
-    complexity: 'High',
-    features: ['Product Management', 'Cart Logic', 'Payment Integration']
-  },
-  {
-    id: 'saas-dashboard',
-    title: 'SaaS Admin Dashboard',
-    description: 'Responsive admin panel with analytics charts, user management table, and settings configuration.',
-    type: 'web',
-    icon: LayoutDashboard,
-    stack: ['React', 'Vite', 'Recharts', 'Supabase'],
-    complexity: 'Medium',
-    features: ['Data Visualization', 'Auth Flow', 'Dark Mode']
-  },
-  {
-    id: 'ai-chat-bot',
-    title: 'AI Customer Support Bot',
-    description: 'Intelligent chatbot capable of answering FAQs, routing tickets, and integrating with Slack/Discord.',
-    type: 'bot',
-    icon: MessageSquare,
-    stack: ['Node.js', 'OpenAI API', 'WebSockets'],
-    complexity: 'Medium',
-    features: ['NLP Processing', 'Real-time Socket', 'Ticket System']
-  },
-  {
-    id: 'crypto-wallet',
-    title: 'DeFi Crypto Wallet',
-    description: 'Mobile-first application for tracking portfolio, sending tokens, and viewing transaction history.',
-    type: 'app',
-    icon: Smartphone,
-    stack: ['React Native', 'Ethers.js', 'Expo'],
-    complexity: 'High',
-    features: ['Wallet Connect', 'Live Pricing', 'Security Enclave']
-  },
-  {
-    id: 'api-gateway',
-    title: 'Microservices API Gateway',
-    description: 'Centralized gateway for routing requests, rate limiting, and authentication across microservices.',
-    type: 'software',
-    icon: Database,
-    stack: ['Go', 'Docker', 'Redis'],
-    complexity: 'High',
-    features: ['Rate Limiting', 'JWT Auth', 'Load Balancing']
-  },
-  {
-    id: 'landing-page',
-    title: 'High-Conversion Landing',
-    description: 'SEO-optimized landing page with hero section, features grid, pricing table, and lead capture form.',
-    type: 'web',
-    icon: Globe,
-    stack: ['HTML5', 'CSS3', 'JavaScript'],
-    complexity: 'Low',
-    features: ['Responsive Design', 'SEO Meta', 'Form Handling']
-  }
-];
+const TEMPLATES: Template[] = [];
 
 const Templates = () => {
   const navigate = useNavigate();
@@ -115,48 +54,62 @@ const Templates = () => {
         </p>
       </div>
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {TEMPLATES.map((template) => (
-          <Card key={template.id} className="group relative flex flex-col h-full hover:border-orange-500/50 transition-all duration-300">
-            <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-              <Button onClick={() => handleUseTemplate(template)} className="h-8 px-3 text-xs">
-                Use Template <ArrowRight size={14} />
-              </Button>
-            </div>
-
-            <div className="mb-6">
-              <div className="w-12 h-12 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-400 mb-4 group-hover:bg-orange-500/10 group-hover:text-orange-500 transition-colors">
-                <template.icon size={24} />
-              </div>
-              <h3 className="text-xl font-bold text-white mb-2">{template.title}</h3>
-              <p className="text-sm text-zinc-400 line-clamp-3 leading-relaxed">
-                {template.description}
-              </p>
-            </div>
-
-            <div className="mt-auto space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {template.stack.map(tech => (
-                  <span key={tech} className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 px-2 py-1 rounded text-zinc-300">
-                    {tech}
-                  </span>
-                ))}
+      {TEMPLATES.length === 0 ? (
+        <div className="py-20 flex flex-col items-center justify-center text-center space-y-6">
+          <div className="w-16 h-16 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-600">
+            <LayoutTemplate size={32} />
+          </div>
+          <div>
+            <h3 className="text-xl font-medium text-white">No templates available yet</h3>
+            <p className="text-zinc-500 max-w-sm mx-auto mt-2">
+              Check back later for new project templates to jumpstart your development.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {TEMPLATES.map((template) => (
+            <Card key={template.id} className="group relative flex flex-col h-full hover:border-orange-500/50 transition-all duration-300">
+              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button onClick={() => handleUseTemplate(template)} className="h-8 px-3 text-xs">
+                  Use Template <ArrowRight size={14} />
+                </Button>
               </div>
 
-              <div className="pt-4 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-500">
-                <div className="flex items-center gap-1.5">
-                   <Zap size={14} className={template.complexity === 'High' ? 'text-red-400' : template.complexity === 'Medium' ? 'text-amber-400' : 'text-green-400'} />
-                   <span>{template.complexity} Complexity</span>
+              <div className="mb-6">
+                <div className="w-12 h-12 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-400 mb-4 group-hover:bg-orange-500/10 group-hover:text-orange-500 transition-colors">
+                  <template.icon size={24} />
                 </div>
-                <div className="flex items-center gap-1.5">
-                   <Shield size={14} className="text-blue-400" />
-                   <span>Production Ready</span>
+                <h3 className="text-xl font-bold text-white mb-2">{template.title}</h3>
+                <p className="text-sm text-zinc-400 line-clamp-3 leading-relaxed">
+                  {template.description}
+                </p>
+              </div>
+
+              <div className="mt-auto space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {template.stack.map(tech => (
+                    <span key={tech} className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 px-2 py-1 rounded text-zinc-300">
+                      {tech}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="pt-4 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-500">
+                  <div className="flex items-center gap-1.5">
+                     <Zap size={14} className={template.complexity === 'High' ? 'text-red-400' : template.complexity === 'Medium' ? 'text-amber-400' : 'text-green-400'} />
+                     <span>{template.complexity} Complexity</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                     <Shield size={14} className="text-blue-400" />
+                     <span>Production Ready</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

@@ -9,7 +9,6 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import { Card, Button, Badge } from '../components/UI';
 import { StorageService } from '../services/storageService';
-import { DbClient } from '../database/client';
 import { useToast } from '../components/Toast';
 
 const LANGUAGES = [
@@ -180,7 +179,7 @@ const Projects = () => {
     language: 'Node.js'
   });
 
-  const isDbEnabled = DbClient.isEnabled();
+  const isDbEnabled = !!import.meta.env.VITE_FIREBASE_API_KEY;
 
   useEffect(() => {
     loadProjects();
@@ -368,8 +367,8 @@ const Projects = () => {
           <div className="flex items-center gap-2 mt-1">
             <p className="text-zinc-400">Manage and continue your builds.</p>
             {isDbEnabled && (
-              <Badge color="green">
-                 <div className="flex items-center gap-1"><Database size={10} /> PostgreSQL Connected</div>
+              <Badge color="orange">
+                 <div className="flex items-center gap-1"><Database size={10} /> Firebase Connected</div>
               </Badge>
             )}
           </div>

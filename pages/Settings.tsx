@@ -3,11 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Cpu, Database, Trash2, Shield, Zap, Monitor, 
   HardDrive, AlertTriangle, Check, Terminal,
-  Brain, Sliders, Eraser, Activity, Lock, Plus, Key, Globe, User, ExternalLink, Eye, EyeOff, Globe2, ChevronRight, MousePointer2
+  Brain, Sliders, Eraser, Activity, Lock, Plus, Key, Globe, User, ExternalLink, Eye, EyeOff, Globe2, ChevronRight, MousePointer2, ChevronDown,
+  RefreshCw, Power, Settings as SettingsIcon, MoreVertical, List, Layers, Clock, BarChart3
 } from 'lucide-react';
 import { Card, Button, Badge, Tooltip } from '../components/UI';
 import { ApiConfigService, ApiKeyConfig, ApiProvider } from '../services/apiConfigService';
-import { DbClient } from '../database/client';
 
 const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => (
   <button 
@@ -35,6 +35,105 @@ const Section = ({ title, icon: Icon, children, description }: { title: string, 
   </div>
 );
 
+const AGENT_OPTIONS = [
+  { group: 'System', options: [
+    { value: 'global', label: 'Global (Default)' }
+  ]},
+  { group: 'Core Team', options: [
+    { value: 'Aarav', label: 'Aarav (Team Leader)' },
+    { value: 'Sanya', label: 'Sanya (Researcher)' },
+    { value: 'Arjun', label: 'Arjun (Product Manager)' },
+    { value: 'Rohit', label: 'Rohit (Architect)' },
+    { value: 'Vikram', label: 'Vikram (Backend)' },
+    { value: 'Neha', label: 'Neha (Frontend)' },
+    { value: 'Kunal', label: 'Kunal (DevOps)' },
+    { value: 'Pooja', label: 'Pooja (QA)' },
+    { value: 'Cipher', label: 'Cipher (Red Team)' },
+    { value: 'Shadow', label: 'Shadow (Critic)' },
+    { value: 'Maya', label: 'Maya (Preview)' }
+  ]},
+  { group: 'Creative & Design', options: [
+    { value: 'Priya', label: 'Priya (UI/UX)' },
+    { value: 'Riya', label: 'Riya (Copywriter)' },
+    { value: 'Zara', label: 'Zara (3D/Animation)' }
+  ]},
+  { group: 'AI & Data', options: [
+    { value: 'Aditya', label: 'Aditya (AI/ML)' },
+    { value: 'Meera', label: 'Meera (Data Analyst)' },
+    { value: 'Vivaan', label: 'Vivaan (Context)' }
+  ]},
+  { group: 'Specialized Tech', options: [
+    { value: 'Karan', label: 'Karan (Mobile)' },
+    { value: 'Aryan', label: 'Aryan (Game Dev)' },
+    { value: 'Kabir', label: 'Kabir (Blockchain)' }
+  ]},
+  { group: 'Business', options: [
+    { value: 'Ananya', label: 'Ananya (Business)' },
+    { value: 'Dev', label: 'Dev (Marketing)' }
+  ]},
+  { group: 'Infrastructure', options: [
+    { value: 'Ishan', label: 'Ishan (DB Admin)' },
+    { value: 'Naina', label: 'Naina (API Specialist)' }
+  ]},
+  { group: 'Support', options: [
+    { value: 'Tara', label: 'Tara (UX Research)' }
+  ]}
+];
+
+const AgentSelect = ({ value, onChange }: { value: string; onChange: (val: string) => void }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  const selectedOption = AGENT_OPTIONS.flatMap(g => g.options).find(o => o.value === value);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 pr-10 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none flex items-center justify-between hover:border-zinc-700 transition-colors"
+      >
+        <span className="truncate">{selectedOption?.label || value}</span>
+        <ChevronDown size={16} className={`text-zinc-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <div className="absolute top-full left-0 right-0 mt-2 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 max-h-64 overflow-y-auto overflow-x-hidden animate-fade-in">
+            {AGENT_OPTIONS.map((group) => (
+              <div key={group.group} className="p-1">
+                <div className="px-3 py-1.5 text-[10px] font-black text-zinc-500 uppercase tracking-widest bg-zinc-900/50 sticky top-0 z-10">
+                  {group.group}
+                </div>
+                <div className="space-y-0.5 mt-1">
+                  {group.options.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt.value);
+                        setIsOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-md text-xs transition-all flex items-center justify-between group ${
+                        value === opt.value 
+                          ? 'bg-orange-500/10 text-orange-400 font-bold' 
+                          : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      {value === opt.value && <Check size={12} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 const Settings = () => {
   const [preferences, setPreferences] = useState({
     thinkingBudget: 2048,
@@ -45,18 +144,21 @@ const Settings = () => {
 
   const [apiConfigs, setApiConfigs] = useState<ApiKeyConfig[]>([]);
   const [showAddApi, setShowAddApi] = useState(false);
-  const [newApi, setNewApi] = useState<Omit<ApiKeyConfig, 'id'>>({
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [newApi, setNewApi] = useState<Omit<ApiKeyConfig, 'id' | 'status' | 'totalCalls' | 'errorCount' | 'successRate' | 'currentRpm' | 'enabled'>>({
     provider: 'gemini',
     key: '',
     scope: 'global',
     modelId: 'gemini-3-pro-preview',
     label: '',
-    baseUrl: ''
+    baseUrl: '',
+    rpmLimit: 15,
+    fallbackEnabled: false
   });
   
   // Database Settings
-  const [dbConfig, setDbConfig] = useState(DbClient.getConfig());
-  const [dbStatus, setDbStatus] = useState(DbClient.isEnabled());
+  const [dbStatus, setDbStatus] = useState(false);
   const [isEnvManaged, setIsEnvManaged] = useState(false);
 
   const [storageStats, setStorageStats] = useState({
@@ -82,9 +184,9 @@ const Settings = () => {
     });
 
     // Check DB status on mount
-    setDbStatus(DbClient.isEnabled());
-    setIsEnvManaged(DbClient.isEnvManaged());
-    setDbConfig(DbClient.getConfig());
+    const hasFirebase = !!import.meta.env.VITE_FIREBASE_API_KEY;
+    setDbStatus(hasFirebase);
+    setIsEnvManaged(hasFirebase);
   }, []);
 
   const savePref = (key: string, value: any) => {
@@ -105,33 +207,52 @@ const Settings = () => {
     ApiConfigService.saveConfig(newApi);
     setApiConfigs(ApiConfigService.getConfigs());
     setShowAddApi(false);
-    setNewApi({ provider: 'gemini', key: '', scope: 'global', modelId: 'gemini-3-pro-preview', label: '', baseUrl: '' });
+    setNewApi({ provider: 'gemini', key: '', scope: 'global', modelId: 'gemini-3-pro-preview', label: '', baseUrl: '', rpmLimit: 15, fallbackEnabled: false });
     showNotification("API Connection established.");
+  };
+
+  const handleBulkAdd = () => {
+    const lines = bulkText.split('\n').filter(l => l.trim());
+    if (lines.length > 15) {
+      alert("Max 15 keys at once.");
+      return;
+    }
+
+    const configs = lines.map(line => {
+      const [key, label, scope] = line.split(',').map(s => s.trim());
+      return {
+        provider: newApi.provider,
+        key: key || '',
+        label: label || `Key ${Math.random().toString(36).substr(2, 4)}`,
+        scope: scope || 'global',
+        modelId: newApi.modelId,
+        rpmLimit: newApi.rpmLimit,
+        fallbackEnabled: false
+      };
+    });
+
+    ApiConfigService.saveBulk(configs);
+    setApiConfigs(ApiConfigService.getConfigs());
+    setBulkMode(false);
+    setBulkText('');
+    showNotification(`${configs.length} keys added.`);
+  };
+
+  const handleToggleKey = (id: string, enabled: boolean) => {
+    ApiConfigService.updateConfig(id, { enabled });
+    setApiConfigs(ApiConfigService.getConfigs());
+  };
+
+  const handleResetCooldown = (id: string) => {
+    ApiConfigService.updateConfig(id, { status: 'idle', cooldownUntil: undefined });
+    setApiConfigs(ApiConfigService.getConfigs());
+    showNotification("Cooldown reset.");
   };
 
   const handleRemoveApi = (id: string) => {
     ApiConfigService.removeConfig(id);
     setApiConfigs(ApiConfigService.getConfigs());
     showNotification("Connection removed.");
-  };
-
-  const handleDbSave = () => {
-    if (!dbConfig.url || !dbConfig.key) {
-      alert("Please enter both URL and API Key");
-      return;
-    }
-    DbClient.saveConfig(dbConfig.url, dbConfig.key);
-    setDbStatus(DbClient.isEnabled());
-    setIsEnvManaged(false);
-    showNotification("Database Settings Saved & Connected");
-  };
-
-  const handleDbDisconnect = () => {
-    if (isEnvManaged) return;
-    DbClient.disable();
-    setDbConfig({ ...dbConfig, enabled: false });
-    setDbStatus(false);
-    showNotification("Database Disconnected");
   };
 
   const getModelHint = (provider: ApiProvider) => {
@@ -164,69 +285,27 @@ const Settings = () => {
       </div>
 
       {/* --- DATABASE SETTINGS --- */}
-      <Section title="PostgreSQL Database" icon={Database} description="Connect to Supabase to persist projects and logs across sessions.">
-        <Card className={`border-2 transition-colors ${dbStatus ? 'border-green-500/20 bg-green-500/5' : 'border-zinc-800'}`}>
-          <div className="flex justify-between items-start mb-6">
+      <Section title="Database & Storage" icon={Database} description="Data persistence status.">
+        <Card className={`border-2 transition-colors ${dbStatus ? 'border-orange-500/20 bg-orange-500/5' : 'border-zinc-800'}`}>
+          <div className="flex justify-between items-center">
              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${dbStatus ? 'bg-green-500/10 text-green-500' : 'bg-zinc-800 text-zinc-500'}`}>
+                <div className={`p-2 rounded-lg ${dbStatus ? 'bg-orange-500/10 text-orange-500' : 'bg-zinc-800 text-zinc-500'}`}>
                    <Database size={24} />
                 </div>
                 <div>
-                   <h3 className="font-bold text-white">Supabase Connection</h3>
+                   <h3 className="font-bold text-white">Firebase Firestore</h3>
                    <div className="flex items-center gap-2 text-xs">
-                      <span className={`w-2 h-2 rounded-full ${dbStatus ? 'bg-green-500 animate-pulse' : 'bg-zinc-600'}`}></span>
-                      <span className={dbStatus ? 'text-green-400' : 'text-zinc-500'}>
+                      <span className={`w-2 h-2 rounded-full ${dbStatus ? 'bg-orange-500 animate-pulse' : 'bg-zinc-600'}`}></span>
+                      <span className={dbStatus ? 'text-orange-400' : 'text-zinc-500'}>
                         {dbStatus 
-                          ? (isEnvManaged ? 'Connected automatically (Hosting Provider)' : 'Connected (Manual)') 
-                          : 'Disconnected (Using LocalStorage)'}
+                          ? 'Connected (Environment Managed)' 
+                          : 'Disconnected (Missing Config)'}
                       </span>
                    </div>
                 </div>
              </div>
-             {dbStatus && !isEnvManaged && (
-               <Button variant="outline" onClick={handleDbDisconnect} className="text-xs h-8 border-red-500/30 text-red-400 hover:bg-red-500/10">
-                 Disconnect
-               </Button>
-             )}
-             {isEnvManaged && (
-               <Badge color="green">Auto-Managed</Badge>
-             )}
-          </div>
-
-          <div className="space-y-4">
-             <div className="grid md:grid-cols-2 gap-4">
-               <div className="space-y-2">
-                 <label className="text-xs font-bold text-zinc-400 uppercase">Project URL</label>
-                 <input 
-                   type="text"
-                   value={dbConfig.url}
-                   onChange={(e) => setDbConfig({...dbConfig, url: e.target.value})}
-                   placeholder="https://xyz.supabase.co"
-                   disabled={isEnvManaged}
-                   className={`w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-green-500/50 outline-none placeholder:text-zinc-600 ${isEnvManaged ? 'opacity-50 cursor-not-allowed' : ''}`}
-                 />
-               </div>
-               <div className="space-y-2">
-                 <label className="text-xs font-bold text-zinc-400 uppercase">API Key (Anon/Public)</label>
-                 <div className="relative">
-                   <input 
-                     type="password"
-                     value={isEnvManaged ? '••••••••••••••••' : dbConfig.key}
-                     onChange={(e) => setDbConfig({...dbConfig, key: e.target.value})}
-                     placeholder="eyJhbGciOiJIUzI1NiIsInR5c..."
-                     disabled={isEnvManaged}
-                     className={`w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-green-500/50 outline-none placeholder:text-zinc-600 ${isEnvManaged ? 'opacity-50 cursor-not-allowed' : ''}`}
-                   />
-                 </div>
-               </div>
-             </div>
-             
-             {!dbStatus && !isEnvManaged && (
-               <div className="flex justify-end pt-2">
-                  <Button onClick={handleDbSave} className="bg-green-600 hover:bg-green-500 text-white shadow-lg shadow-green-900/20">
-                     Connect Database
-                  </Button>
-               </div>
+             {dbStatus && (
+               <Badge color="orange">Auto-Managed</Badge>
              )}
           </div>
         </Card>
@@ -235,42 +314,149 @@ const Settings = () => {
       {/* --- API CONNECTIONS --- */}
       <Section title="Model Connections" icon={Cpu} description="Manage LLM providers and API keys for specific agents.">
         
+        {/* Stats Summary */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          <Card className="p-3 flex flex-col items-center justify-center bg-zinc-900/30">
+            <span className="text-xl font-bold text-white">{apiConfigs.length}</span>
+            <span className="text-[10px] text-zinc-500 uppercase font-bold">Total Keys</span>
+          </Card>
+          <Card className="p-3 flex flex-col items-center justify-center bg-zinc-900/30">
+            <span className="text-xl font-bold text-green-500">{apiConfigs.filter(k => k.status === 'idle').length}</span>
+            <span className="text-[10px] text-zinc-500 uppercase font-bold">Available</span>
+          </Card>
+          <Card className="p-3 flex flex-col items-center justify-center bg-zinc-900/30">
+            <span className="text-xl font-bold text-orange-500">{apiConfigs.filter(k => k.status === 'rate_limited').length}</span>
+            <span className="text-[10px] text-zinc-500 uppercase font-bold">Rate Limited</span>
+          </Card>
+          <Card className="p-3 flex flex-col items-center justify-center bg-zinc-900/30">
+            <span className="text-xl font-bold text-blue-500">{apiConfigs.filter(k => k.scope === 'global').length}</span>
+            <span className="text-[10px] text-zinc-500 uppercase font-bold">Global Pool</span>
+          </Card>
+        </div>
+
         {/* Existing Configs */}
-        <div className="grid gap-4">
+        <div className="grid gap-3">
            {apiConfigs.map(config => (
-             <Card key={config.id} className="flex items-center justify-between p-4 bg-zinc-900/50">
-                <div className="flex items-center gap-4">
-                   <div className="p-2 bg-zinc-800 rounded-lg text-zinc-400">
-                     {config.provider === 'gemini' && <Zap size={20} className="text-blue-400" />}
-                     {config.provider === 'openai' && <Brain size={20} className="text-green-400" />}
-                     {config.provider === 'anthropic' && <Activity size={20} className="text-amber-400" />}
-                     {config.provider === 'ollama' && <Terminal size={20} className="text-white" />}
-                   </div>
-                   <div>
-                      <h4 className="font-bold text-white text-sm">{config.label}</h4>
-                      <div className="flex items-center gap-2 text-xs text-zinc-500">
-                         <Badge>{config.provider}</Badge>
-                         <span>{config.modelId}</span>
-                         {config.scope !== 'global' && <Badge color="purple">Agent: {config.scope}</Badge>}
+             <Card key={config.id} className={`group relative overflow-hidden transition-all border-l-4 ${
+               !config.enabled ? 'opacity-50 border-zinc-700' : 
+               config.status === 'rate_limited' ? 'border-orange-500' :
+               config.status === 'in_use' ? 'border-blue-500' :
+               'border-green-500'
+             }`}>
+                <div className="flex items-center justify-between p-4">
+                  <div className="flex items-center gap-4">
+                    <div className={`p-2 rounded-lg ${
+                      config.provider === 'gemini' ? 'bg-blue-500/10 text-blue-400' :
+                      config.provider === 'openai' ? 'bg-green-500/10 text-green-400' :
+                      config.provider === 'anthropic' ? 'bg-amber-500/10 text-amber-400' :
+                      'bg-zinc-800 text-zinc-400'
+                    }`}>
+                      {config.provider === 'gemini' && <Zap size={20} />}
+                      {config.provider === 'openai' && <Brain size={20} />}
+                      {config.provider === 'anthropic' && <Activity size={20} />}
+                      {config.provider === 'ollama' && <Terminal size={20} />}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-white text-sm">{config.label}</h4>
+                        <span className="text-[10px] font-mono text-zinc-600">{config.key.substring(0, 8)}...</span>
                       </div>
-                   </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Badge color={config.status === 'idle' ? 'green' : config.status === 'rate_limited' ? 'orange' : 'blue'}>
+                          {config.status.replace('_', ' ')}
+                        </Badge>
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">
+                          {config.provider} • {config.modelId}
+                        </span>
+                        {config.scope !== 'global' ? (
+                          <Badge color="purple" className="text-[9px] px-1.5 py-0">Agent: {config.scope}</Badge>
+                        ) : (
+                          <Badge color="blue" className="text-[9px] px-1.5 py-0">Global Pool</Badge>
+                        )}
+                        {config.scope !== 'global' && (
+                          <button 
+                            onClick={() => {
+                              ApiConfigService.updateConfig(config.id, { fallbackEnabled: !config.fallbackEnabled });
+                              setApiConfigs(ApiConfigService.getConfigs());
+                            }}
+                            className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${config.fallbackEnabled ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-zinc-800 text-zinc-500 border-zinc-700'}`}
+                            title="If personal key fails, use Global Pool"
+                          >
+                            Fallback: {config.fallbackEnabled ? 'ON' : 'OFF'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="hidden md:flex flex-col items-end mr-4 text-right">
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase">Success Rate</div>
+                      <div className={`text-xs font-mono font-bold ${config.successRate > 90 ? 'text-green-400' : 'text-orange-400'}`}>
+                        {config.successRate}% ({config.totalCalls} calls)
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-1">
+                      {config.status === 'rate_limited' && (
+                        <button 
+                          onClick={() => handleResetCooldown(config.id)}
+                          className="p-2 text-orange-400 hover:bg-orange-500/10 rounded-lg transition-colors"
+                          title="Reset Cooldown"
+                        >
+                          <RefreshCw size={16} />
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => handleToggleKey(config.id, !config.enabled)}
+                        className={`p-2 rounded-lg transition-colors ${config.enabled ? 'text-green-400 hover:bg-green-500/10' : 'text-zinc-500 hover:bg-zinc-500/10'}`}
+                        title={config.enabled ? "Disable" : "Enable"}
+                      >
+                        <Power size={16} />
+                      </button>
+                      <button 
+                        onClick={() => handleRemoveApi(config.id)} 
+                        className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <button onClick={() => handleRemoveApi(config.id)} className="text-zinc-500 hover:text-red-400 p-2">
-                  <Trash2 size={16} />
-                </button>
+                
+                {/* Progress bar for RPM if limit exists */}
+                {config.rpmLimit && config.enabled && (
+                  <div className="h-1 bg-zinc-800 w-full mt-auto">
+                    <div 
+                      className="h-full bg-blue-500 transition-all duration-500" 
+                      style={{ width: `${Math.min((config.currentRpm / config.rpmLimit) * 100, 100)}%` }}
+                    />
+                  </div>
+                )}
              </Card>
            ))}
+           {apiConfigs.length === 0 && (
+             <div className="text-center py-10 border-2 border-dashed border-zinc-800 rounded-xl">
+               <Key className="mx-auto text-zinc-700 mb-2" size={32} />
+               <p className="text-zinc-500 text-sm">No API keys connected yet.</p>
+             </div>
+           )}
         </div>
 
         {/* Add New Button */}
         {!showAddApi ? (
-          <Button variant="outline" onClick={() => setShowAddApi(true)} className="border-dashed w-full py-4 text-zinc-400 hover:text-white hover:border-zinc-600">
-            <Plus size={16} /> Add New Connection
-          </Button>
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant="outline" onClick={() => { setShowAddApi(true); setBulkMode(false); }} className="border-dashed py-4 text-zinc-400 hover:text-white hover:border-zinc-600">
+              <Plus size={16} /> Single Key
+            </Button>
+            <Button variant="outline" onClick={() => { setShowAddApi(true); setBulkMode(true); }} className="border-dashed py-4 text-zinc-400 hover:text-white hover:border-zinc-600">
+              <Layers size={16} /> Bulk Add (Max 15)
+            </Button>
+          </div>
         ) : (
           <Card className="animate-fade-in border-orange-500/30">
              <div className="flex justify-between items-center mb-4">
-               <h4 className="font-bold text-white">New Connection</h4>
+               <h4 className="font-bold text-white">{bulkMode ? 'Bulk Key Addition' : 'New Connection'}</h4>
                <button onClick={() => setShowAddApi(false)}><Key size={16} className="text-zinc-500" /></button>
              </div>
              
@@ -291,44 +477,6 @@ const Settings = () => {
                       </select>
                    </div>
                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-400 uppercase">Label (Name)</label>
-                      <input 
-                        type="text"
-                        value={newApi.label}
-                        onChange={(e) => setNewApi({...newApi, label: e.target.value})}
-                        placeholder="My Pro Key"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none"
-                      />
-                   </div>
-                </div>
-
-                <div className="space-y-2">
-                   <label className="text-xs font-bold text-zinc-400 uppercase">API Key</label>
-                   <input 
-                      type="password"
-                      value={newApi.key}
-                      onChange={(e) => setNewApi({...newApi, key: e.target.value})}
-                      placeholder="sk-..."
-                      disabled={newApi.provider === 'ollama'}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none disabled:opacity-50"
-                   />
-                </div>
-
-                {newApi.provider === 'ollama' && (
-                  <div className="space-y-2">
-                     <label className="text-xs font-bold text-zinc-400 uppercase">Base URL</label>
-                     <input 
-                        type="text"
-                        value={newApi.baseUrl}
-                        onChange={(e) => setNewApi({...newApi, baseUrl: e.target.value})}
-                        placeholder="http://localhost:11434/v1"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none"
-                     />
-                  </div>
-                )}
-
-                <div className="grid md:grid-cols-2 gap-4">
-                   <div className="space-y-2">
                       <label className="text-xs font-bold text-zinc-400 uppercase">Model ID</label>
                       <input 
                         type="text"
@@ -338,25 +486,103 @@ const Settings = () => {
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none"
                       />
                    </div>
-                   <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-400 uppercase">Scope</label>
-                      <select 
-                        value={newApi.scope}
-                        onChange={(e) => setNewApi({...newApi, scope: e.target.value})}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none"
-                      >
-                        <option value="global">Global (Default)</option>
-                        <option value="Cipher">Cipher (Red Team)</option>
-                        <option value="Sanya">Sanya (Research)</option>
-                        <option value="Rohit">Rohit (Architect)</option>
-                        <option value="Vikram">Vikram (Backend)</option>
-                      </select>
-                   </div>
+                </div>
+
+                {bulkMode ? (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-zinc-400 uppercase">Bulk Input (CSV Format)</label>
+                      <span className="text-[10px] text-zinc-500">Format: key, label, scope</span>
+                    </div>
+                    <textarea 
+                      value={bulkText}
+                      onChange={(e) => setBulkText(e.target.value)}
+                      placeholder="sk-..., Key 1, global&#10;sk-..., Key 2, Vikram&#10;sk-..., Key 3, Neha"
+                      className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none font-mono"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                          <label className="text-xs font-bold text-zinc-400 uppercase">Label (Name)</label>
+                          <input 
+                            type="text"
+                            value={newApi.label}
+                            onChange={(e) => setNewApi({...newApi, label: e.target.value})}
+                            placeholder="My Pro Key"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none"
+                          />
+                      </div>
+                      <div className="space-y-2">
+                          <label className="text-xs font-bold text-zinc-400 uppercase">Scope (Agent)</label>
+                          <AgentSelect 
+                            value={newApi.scope}
+                            onChange={(val) => setNewApi({...newApi, scope: val})}
+                          />
+                          {newApi.scope !== 'global' && (
+                            <div className="flex items-center gap-2 mt-2">
+                              <input 
+                                type="checkbox" 
+                                id="fallback"
+                                checked={newApi.fallbackEnabled}
+                                onChange={(e) => setNewApi({...newApi, fallbackEnabled: e.target.checked})}
+                                className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-orange-500 focus:ring-orange-500"
+                              />
+                              <label htmlFor="fallback" className="text-xs text-zinc-400 cursor-pointer select-none">
+                                Fallback to Global Pool if busy
+                              </label>
+                            </div>
+                          )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-400 uppercase">API Key</label>
+                      <input 
+                          type="password"
+                          value={newApi.key}
+                          onChange={(e) => setNewApi({...newApi, key: e.target.value})}
+                          placeholder="sk-..."
+                          disabled={newApi.provider === 'ollama'}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none disabled:opacity-50"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-400 uppercase">RPM Limit</label>
+                    <input 
+                      type="number"
+                      value={newApi.rpmLimit || ''}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        setNewApi({...newApi, rpmLimit: isNaN(val) ? 0 : val});
+                      }}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none"
+                    />
+                  </div>
+                  {newApi.provider === 'ollama' && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-400 uppercase">Base URL</label>
+                      <input 
+                          type="text"
+                          value={newApi.baseUrl}
+                          onChange={(e) => setNewApi({...newApi, baseUrl: e.target.value})}
+                          placeholder="http://localhost:11434/v1"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-orange-500 outline-none"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-3 mt-2">
                    <Button variant="secondary" onClick={() => setShowAddApi(false)}>Cancel</Button>
-                   <Button onClick={handleAddApi}>Save Connection</Button>
+                   <Button onClick={bulkMode ? handleBulkAdd : handleAddApi}>
+                     {bulkMode ? `Add ${bulkText.split('\n').filter(l => l.trim()).length} Keys` : 'Save Connection'}
+                   </Button>
                 </div>
              </div>
           </Card>

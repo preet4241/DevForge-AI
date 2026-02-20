@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Bot, ChevronLeft, Wrench, MessageSquare, Monitor, Terminal, Paperclip, X, FileCode, 
   ArrowUp, Activity, MoreVertical, Rocket, Zap, Globe, Download, Code, Maximize2, Minimize2, Copy, Check,
   Ghost, MessageCircleWarning, Trash2, BookOpen, Sparkles, Book, BrainCircuit, Save,
-  Play, Square, Eye, Layout
+  Play, Square
 } from 'lucide-react';
 import { Button, Badge, Tooltip } from '../components/UI';
 import { Orchestrator } from '../services/orchestrator';
@@ -62,7 +63,6 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'chat' | 'preview'>('chat');
   
   // Artifacts
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -188,7 +188,7 @@ const Chat = () => {
           if (foundArtifacts.length > 0) {
              setArtifacts(prev => [...prev, ...foundArtifacts]);
              setActiveArtifactId(foundArtifacts[0].id);
-             // Logic to auto-switch to preview if desired, but user might want to stay in chat
+             setShowArtifacts(true);
           }
 
           const msgId = Date.now().toString() + Math.random();
@@ -234,13 +234,11 @@ const Chat = () => {
   };
 
   useEffect(() => {
-    if (viewMode === 'chat') {
-       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, currentStatus, viewMode]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, currentStatus]);
 
   // Derive activeArtifact from the artifacts array using activeArtifactId
-  const activeArtifact = artifacts.find(art => art.id === activeArtifactId) || artifacts[artifacts.length - 1];
+  const activeArtifact = artifacts.find(art => art.id === activeArtifactId);
 
   return (
     <div className="flex flex-col h-screen bg-zinc-950 text-zinc-200 overflow-hidden font-inter relative">
@@ -282,87 +280,47 @@ const Chat = () => {
 
       {/* MAIN WORKSPACE */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* VIEW AREA (CHAT OR PREVIEW) */}
+        {/* CHAT AREA */}
         <div className="flex-1 flex flex-col min-w-0 bg-zinc-950 relative">
-          
-          {/* CONTENT SWITCHER */}
-          {viewMode === 'chat' ? (
-            <div className="flex-1 overflow-y-auto custom-scrollbar px-3 md:px-6 py-4 md:py-8 space-y-6 md:space-y-8">
-              {messages.map((msg, i) => (
-                <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in`}>
-                  {msg.role === 'model' && (
-                    <div className="flex items-center gap-2 mb-2 px-1">
-                      <div className="w-6 h-6 rounded-full bg-orange-600 flex items-center justify-center text-[10px] font-black text-white border border-orange-400/30">
-                         {msg.agentName?.[0] || 'A'}
-                      </div>
-                      <span className="text-xs font-bold text-orange-500 uppercase tracking-widest">{msg.agentName || 'AI Agent'}</span>
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-3 md:px-6 py-4 md:py-8 space-y-6 md:space-y-8">
+            {messages.map((msg, i) => (
+              <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in`}>
+                {msg.role === 'model' && (
+                  <div className="flex items-center gap-2 mb-2 px-1">
+                    <div className="w-6 h-6 rounded-full bg-orange-600 flex items-center justify-center text-[10px] font-black text-white border border-orange-400/30">
+                       {msg.agentName?.[0] || 'A'}
                     </div>
-                  )}
-                  <div className={`
-                    max-w-[92%] sm:max-w-[85%] rounded-2xl p-4 md:p-5 shadow-sm
-                    ${msg.role === 'user' 
-                      ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm border border-zinc-700' 
-                      : 'bg-zinc-900/50 border border-zinc-800 text-zinc-300 rounded-tl-sm'}
-                  `}>
-                    <Markdown text={msg.text} />
+                    <span className="text-xs font-bold text-orange-500 uppercase tracking-widest">{msg.agentName || 'AI Agent'}</span>
                   </div>
+                )}
+                <div className={`
+                  max-w-[92%] sm:max-w-[85%] rounded-2xl p-4 md:p-5 shadow-sm
+                  ${msg.role === 'user' 
+                    ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm border border-zinc-700' 
+                    : 'bg-zinc-900/50 border border-zinc-800 text-zinc-300 rounded-tl-sm'}
+                `}>
+                  <Markdown text={msg.text} />
                 </div>
-              ))}
-              
-              {/* AGENT STATUS INDICATOR */}
-              {isLoading && currentStatus && (
-                <div className="flex flex-col items-start animate-fade-in">
-                   <div className="flex items-center gap-2 mb-2 px-1">
-                      <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700">
-                         <Activity size={10} className="text-orange-500 animate-pulse" />
-                      </div>
-                      <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{currentStatus.agent}</span>
-                   </div>
-                   <div className="bg-zinc-900/30 border border-dashed border-zinc-800 rounded-2xl px-5 py-4 flex items-center gap-3">
-                      <div className="w-2 h-2 rounded-full bg-orange-500 animate-ping"></div>
-                      <span className="text-sm italic text-zinc-500">{currentStatus.status}</span>
-                   </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} className="h-10 shrink-0" />
-            </div>
-          ) : (
-            <div className="flex-1 overflow-hidden flex flex-col bg-zinc-900/20 animate-fade-in">
-               {activeArtifact ? (
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                     <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/50">
-                        <div className="flex items-center gap-2">
-                           <FileCode className="text-orange-500" size={18} />
-                           <span className="text-sm font-bold text-white truncate">{activeArtifact.title}</span>
-                           <Badge color="orange">{activeArtifact.language}</Badge>
-                        </div>
-                        <div className="flex items-center gap-2">
-                           <button 
-                             onClick={() => { navigator.clipboard.writeText(activeArtifact.content); showToast("Copied code", "success"); }}
-                             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all"
-                           >
-                              <Copy size={16} />
-                           </button>
-                           <button className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all">
-                              <Download size={16} />
-                           </button>
-                        </div>
-                     </div>
-                     <div className="flex-1 overflow-auto bg-black/30 p-6 font-mono text-sm leading-relaxed">
-                        <pre className="text-zinc-300">
-                           <code>{activeArtifact.content}</code>
-                        </pre>
-                     </div>
-                  </div>
-               ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 gap-4">
-                     <Monitor size={48} className="opacity-20" />
-                     <p className="text-lg font-medium italic">No visual output generated yet.</p>
-                     <Button variant="outline" onClick={() => setViewMode('chat')}>Back to Chat</Button>
-                  </div>
-               )}
-            </div>
-          )}
+              </div>
+            ))}
+            
+            {/* AGENT STATUS INDICATOR */}
+            {isLoading && currentStatus && (
+              <div className="flex flex-col items-start animate-fade-in">
+                 <div className="flex items-center gap-2 mb-2 px-1">
+                    <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700">
+                       <Activity size={10} className="text-orange-500 animate-pulse" />
+                    </div>
+                    <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{currentStatus.agent}</span>
+                 </div>
+                 <div className="bg-zinc-900/30 border border-dashed border-zinc-800 rounded-2xl px-5 py-4 flex items-center gap-3">
+                    <div className="w-2 h-2 rounded-full bg-orange-500 animate-ping"></div>
+                    <span className="text-sm italic text-zinc-500">{currentStatus.status}</span>
+                 </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} className="h-10 shrink-0" />
+          </div>
 
           {/* BOTTOM CONSOLE PANEL (Drawer) */}
           {showConsole && (
@@ -459,40 +417,9 @@ const Chat = () => {
                   </Button>
                 </div>
               </div>
-
-              {/* VIEW TOGGLE & STATUS - REFINED POSITION */}
-              <div className="flex items-center justify-between px-1">
-                 <div className="flex items-center gap-4 text-[10px] text-zinc-600 font-bold uppercase tracking-widest overflow-hidden">
-                    <span className="hidden md:flex items-center gap-1 shrink-0"><Zap size={10} className="text-orange-500" /> 24ms</span>
-                    <span className="flex items-center gap-1 shrink-0"><BrainCircuit size={10} /> Reasoning</span>
-                 </div>
-
-                 {/* SLIDING PILL TOGGLE */}
-                 <div className="relative flex bg-zinc-900 border border-zinc-800 p-1 rounded-xl h-9 w-40 shadow-inner">
-                    <div 
-                      className={`absolute top-1 bottom-1 w-[calc(50%-4px)] transition-all duration-300 ease-out rounded-lg ${
-                        viewMode === 'chat' 
-                          ? 'translate-x-0 bg-zinc-800 shadow-md border border-zinc-700/30' 
-                          : 'translate-x-full bg-orange-600 shadow-lg shadow-orange-900/40'
-                      }`}
-                    />
-                    <button
-                      onClick={() => setViewMode('chat')}
-                      className={`relative z-10 flex-1 flex items-center justify-center gap-1.5 transition-colors duration-300 text-[10px] font-black uppercase tracking-widest focus:outline-none ${
-                        viewMode === 'chat' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'
-                      }`}
-                    >
-                      <MessageSquare size={12} /> Chat
-                    </button>
-                    <button
-                      onClick={() => setViewMode('preview')}
-                      className={`relative z-10 flex-1 flex items-center justify-center gap-1.5 transition-colors duration-300 text-[10px] font-black uppercase tracking-widest focus:outline-none ${
-                        viewMode === 'preview' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'
-                      }`}
-                    >
-                      <Eye size={12} /> Preview
-                    </button>
-                 </div>
+              <div className="flex items-center justify-center gap-4 text-[10px] text-zinc-600 font-bold uppercase tracking-widest">
+                 <span className="flex items-center gap-1"><Zap size={10} className="text-orange-500" /> Latency: 24ms</span>
+                 <span className="flex items-center gap-1"><BrainCircuit size={10} /> Mode: Reasoning</span>
               </div>
             </div>
           </div>
@@ -520,7 +447,7 @@ const Chat = () => {
                        artifacts.map((art) => (
                           <button
                              key={art.id}
-                             onClick={() => { setActiveArtifactId(art.id); setViewMode('preview'); }}
+                             onClick={() => setActiveArtifactId(art.id)}
                              className={`px-4 py-3 text-xs font-bold whitespace-nowrap transition-all border-b-2 ${activeArtifactId === art.id ? 'border-orange-500 text-orange-400 bg-orange-500/5' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
                           >
                              {art.title}
