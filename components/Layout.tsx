@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X, Home, Hammer, Bot, Settings, Zap, FolderKanban, LayoutTemplate, BrainCircuit, Workflow } from 'lucide-react';
+import { ThreeLoadingScreen } from './ThreeLoadingScreen';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -34,23 +35,23 @@ const NavItem = ({ to, icon: Icon, label, mobile, badge }: { to: string, icon: a
   );
 };
 
-// Fallback component for Suspense
-const LoadingFallback = () => (
-  <div className="h-full w-full flex items-center justify-center min-h-[400px]" role="status" aria-label="Loading">
-    <div className="flex flex-col items-center gap-4">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orange-500" aria-hidden="true"></div>
-      <span className="text-zinc-500 text-sm font-medium animate-pulse">Initializing Forge...</span>
-    </div>
-  </div>
-);
-
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const location = useLocation();
   
   // Routes that should use the full workspace layout (no sidebar)
   const isWorkspace = location.pathname === '/chat' || location.pathname === '/code' || location.pathname === '/training' || location.pathname === '/logic';
   const isHome = location.pathname === '/';
+
+  React.useEffect(() => {
+    setIsLoading(true);
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 1500); // Force 1.5s loading screen on route change
+
+    return () => clearTimeout(timer);
+  }, [location.pathname]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200 flex overflow-hidden">
@@ -124,11 +125,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         )}
 
         <div className={`flex-1 overflow-x-hidden scroll-smooth ${isWorkspace || isHome ? 'p-0 overflow-hidden' : 'p-4 md:p-8 overflow-y-auto'}`}>
-           <React.Suspense fallback={<LoadingFallback />}>
-            <div className={isHome ? 'h-full overflow-y-auto' : ''}>
-              {children}
-            </div>
-           </React.Suspense>
+           {isLoading ? (
+             <ThreeLoadingScreen />
+           ) : (
+             <React.Suspense fallback={<ThreeLoadingScreen />}>
+              <div className={isHome ? 'h-full overflow-y-auto' : ''}>
+                {children}
+              </div>
+             </React.Suspense>
+           )}
         </div>
       </main>
     </div>

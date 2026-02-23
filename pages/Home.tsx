@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Bot, Code, Cpu, Sparkles, Box, Zap, Layers, Terminal, Database, Globe, Smartphone, CheckCircle2, Rocket, Workflow } from 'lucide-react';
+import { ArrowRight, Bot, Code, Cpu, Sparkles, Package, Zap, Layers, Terminal, Database, Globe, Smartphone, CheckCircle2, Rocket, GitBranch } from 'lucide-react';
 import { Button, Card } from '../components/UI';
 
 const Home = () => {
@@ -24,7 +24,7 @@ const Home = () => {
 
         {/* Floating Abstract Shapes positioned at the far edges */}
         <div className="absolute top-[10%] right-[5%] text-orange-500/15 animate-bounce hidden lg:block" style={{ animationDuration: '6s' }}>
-          <Box size={240} strokeWidth={0.3} />
+          <Package size={240} strokeWidth={0.3} />
         </div>
         <div className="absolute bottom-[10%] left-[5%] text-zinc-500/10 animate-pulse hidden lg:block" style={{ animationDuration: '8s' }}>
           <Layers size={320} strokeWidth={0.2} />
@@ -127,7 +127,7 @@ const Home = () => {
 
             {[
               { icon: Sparkles, title: "1. Ideate", desc: "Describe your app idea in plain English. The more details, the better." },
-              { icon: Workflow, title: "2. Architect", desc: "The Lead Agent breaks down the project, creating a file structure and tech stack." },
+              { icon: GitBranch, title: "2. Architect", desc: "The Lead Agent breaks down the project, creating a file structure and tech stack." },
               { icon: Terminal, title: "3. Generate", desc: "Developer Agents write the code in parallel, ensuring best practices." },
               { icon: Rocket, title: "4. Deploy", desc: "Review the code, download the ZIP, and deploy your new application." }
             ].map((step, i) => (

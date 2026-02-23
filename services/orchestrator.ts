@@ -1,6 +1,6 @@
 
-import { getAgentPersona, chatWithAgent, generateJSON, BEST_PRACTICES, generateVerifiedCode } from './geminiService';
-import { MemoryController } from './memoryService';
+import { getAgentPersona, chatWithAgent, generateJSON } from './geminiService';
+import { AgentMemoryService } from './agentMemoryService';
 import { Type } from '@google/genai';
 
 type StatusCallback = (agentName: string, status: string) => void;
@@ -12,223 +12,136 @@ export class Orchestrator {
     userMessage: string, 
     history: any[], 
     onStatusUpdate: StatusCallback,
-    onMessageChunk: MessageCallback, // New callback for streaming agent responses
+    onMessageChunk: MessageCallback,
     signal?: AbortSignal
   ): Promise<string> {
     
     if (signal?.aborted) throw new Error("Process stopped by user.");
 
-    // Detect project type context from history/state if possible, or default
-    const storedProject = localStorage.getItem('currentProject');
-    const projectInfo = storedProject ? JSON.parse(storedProject) : { type: 'software' };
-    const practices = BEST_PRACTICES[projectInfo.type as keyof typeof BEST_PRACTICES] || BEST_PRACTICES.software;
-
-    // --- STEP 1: AARAV (Team Leader) ---
-    onStatusUpdate('Aarav', 'Reviewing project vision...');
-    // Using RAG Retrieval
-    const aaravMemory = await MemoryController.retrieveRelevantContext('Aarav', userMessage);
-    const aaravPrompt = `
-    User Input: "${userMessage}"
-    Category: ${projectInfo.type}
-    ${aaravMemory}
-    Task: Define the core vision and coordinate the team.
-    `;
-    const aaravResp = await chatWithAgent([], aaravPrompt, getAgentPersona('Aarav'), 'Aarav', { signal });
-    onMessageChunk('Aarav', aaravResp);
-    MemoryController.addExperience('Aarav', 50, ['coordination', 'planning']);
-
-    // --- STEP 2: SANYA (Researcher) ---
-    onStatusUpdate('Sanya', 'Conducting market & trend research...');
-    const sanyaMemory = await MemoryController.retrieveRelevantContext('Sanya', aaravResp);
-    const sanyaPrompt = `
-    Project Vision (Aarav): ${aaravResp}
-    ${sanyaMemory}
-    Task: Perform deep research. Use Google Search to find competitors, libraries, and trends.
-    `;
-    const sanyaResp = await chatWithAgent([], sanyaPrompt, getAgentPersona('Sanya'), 'Sanya', { 
-      signal, 
-      tools: [{googleSearch: {}}] 
-    });
-    onMessageChunk('Sanya', sanyaResp);
-    MemoryController.addExperience('Sanya', 60, ['research', 'analysis']);
-
-    // --- STEP 3: ARJUN (Product Manager) ---
-    onStatusUpdate('Arjun', 'Defining user stories & requirements...');
-    const arjunMemory = await MemoryController.retrieveRelevantContext('Arjun', sanyaResp);
-    const arjunPrompt = `
-    Research Data (Sanya): ${sanyaResp}
-    Vision (Aarav): ${aaravResp}
-    ${arjunMemory}
-    Task: Create Product Requirements Document (PRD) and User Stories.
-    `;
+    // --- STEP 1: AARAV - The Router/Classifier ---
+    onStatusUpdate('Aarav', 'Classifying message and routing...');
     
-    // We get a structured PRD here to pass to Rohit
-    const arjunSchema = {
+    const aaravSchema = {
       type: Type.OBJECT,
       properties: {
-        features: { type: Type.ARRAY, items: { type: Type.STRING } },
-        user_stories: { type: Type.ARRAY, items: { type: Type.STRING } },
-        summary: { type: Type.STRING }
-      },
-      required: ['features', 'summary']
-    };
-    
-    const arjunJson = await generateJSON(arjunPrompt, getAgentPersona('Arjun'), arjunSchema, { signal });
-    const arjunSummary = arjunJson ? arjunJson.summary : "Product requirements defined.";
-    
-    // Format Arjun's response nicely for the chat
-    let arjunDisplay = arjunSummary;
-    if (arjunJson?.features?.length) {
-      arjunDisplay += "\n\n**Key Features:**\n" + arjunJson.features.map((f: string) => `- ${f}`).join('\n');
-    }
-    onMessageChunk('Arjun', arjunDisplay);
-    MemoryController.addExperience('Arjun', 50, ['product', 'requirements']);
-
-    // --- STEP 4: ROHIT (Architect) ---
-    onStatusUpdate('Rohit', 'Designing technical architecture...');
-    const rohitMemory = await MemoryController.retrieveRelevantContext('Rohit', arjunSummary);
-    const rohitPrompt = `
-    PRD (Arjun): ${JSON.stringify(arjunJson)}
-    Best Practices: ${practices.title} - ${practices.rules.join('. ')}
-    ${rohitMemory}
-    
-    Task: Design the system architecture.
-    CRITICAL: Define the execution flow.
-    - Vikram: Backend
-    - Neha: Frontend
-    - Kunal: DevOps/Security
-    - Pooja: QA
-    - Cipher: Red Team & Vulnerability Analysis
-    - Maya: Live Preview & Runtime Simulation
-    `;
-
-    const rohitSchema = {
-      type: Type.OBJECT,
-      properties: {
-        agent_flow: { 
-          type: Type.ARRAY, 
-          items: { type: Type.STRING, enum: ['Vikram', 'Neha', 'Kunal', 'Pooja', 'Cipher', 'Maya'] },
-          description: "Ordered list of agents to execute the build. Include Maya for visual checking."
+        messageType: { 
+          type: Type.STRING, 
+          enum: ['learning', 'casual', 'task', 'debate'],
+          description: "Classify the user message type."
         },
-        tech_stack: { 
-          type: Type.OBJECT,
-          properties: {
-            frontend: { type: Type.STRING },
-            backend: { type: Type.STRING },
-            database: { type: Type.STRING },
-            deployment: { type: Type.STRING }
-          },
-          required: ['frontend', 'backend', 'database', 'deployment']
+        relevantAgents: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: "List of relevant agent names (e.g., 'Sanya', 'Arjun', 'Rohit', 'Vikram', 'Neha', 'Kunal', 'Pooja', 'Cipher', 'Maya'). Empty for casual."
+        },
+        priorityLevel: {
+          type: Type.STRING,
+          enum: ['high', 'medium', 'low']
+        },
+        shouldSaveMemory: {
+          type: Type.BOOLEAN,
+          description: "True if this contains facts, code, or knowledge that should be learned."
+        },
+        topic: {
+          type: Type.STRING,
+          description: "A short 2-3 word topic summary."
         }
       },
-      required: ['agent_flow', 'tech_stack']
+      required: ['messageType', 'relevantAgents', 'priorityLevel', 'shouldSaveMemory', 'topic']
     };
 
-    const plan = await generateJSON(rohitPrompt, getAgentPersona('Rohit'), rohitSchema, { 
-      signal,
-      tools: [{googleSearch: {}}] 
-    });
-
-    if (!plan) return "Architecture phase failed. Please try again.";
-
-    const rohitDisplay = `**Architecture Plan**\n\n**Stack:**\n- Frontend: ${plan.tech_stack.frontend}\n- Backend: ${plan.tech_stack.backend}\n- DB: ${plan.tech_stack.database}\n\n**Agent Flow:** ${plan.agent_flow.join(' → ')}`;
-    onMessageChunk('Rohit', rohitDisplay);
-    MemoryController.addExperience('Rohit', 80, ['design', 'architecture']);
-
-    // --- EXECUTION LOOP ---
-    let accumulatedContext = `
-    Project: ${projectInfo.name}
-    Vision (Aarav): ${aaravResp}
-    Research (Sanya): ${sanyaResp}
-    Requirements (Arjun): ${arjunSummary}
-    Stack: ${JSON.stringify(plan.tech_stack)}
+    const aaravPrompt = `
+      Analyze the following user message and classify it.
+      User Message: "${userMessage}"
+      
+      Available Agents: Sanya (Research), Arjun (PM), Rohit (Architect), Vikram (Backend), Neha (Frontend), Kunal (DevOps), Pooja (QA), Cipher (Security), Maya (UI/UX).
+      
+      Decide if it's learning (facts/code), casual (greetings), task (build/calculate), or debate (complex topic).
+      Select ONLY the relevant agents. If casual, relevantAgents can be empty.
     `;
 
-    let finalResponse = `### Team Report: ${projectInfo.name}\n\n`;
-    finalResponse += `**Aarav (Lead):** ${aaravResp}\n\n`;
-    finalResponse += `**Sanya (Research):** ${sanyaResp}\n\n`;
-    finalResponse += `**Arjun (PM):** ${arjunSummary}\n\n`;
+    const classification = await generateJSON(aaravPrompt, getAgentPersona('Aarav'), aaravSchema, { signal });
+    
+    if (!classification) {
+      return "Aarav failed to classify the message. Please try again.";
+    }
 
-    let lastActiveAgent = 'Rohit';
+    const { messageType, relevantAgents, shouldSaveMemory, topic } = classification;
+    let finalResponse = `**Aarav (Router):** Classified as \`${messageType}\`. Relevant Agents: ${relevantAgents.length ? relevantAgents.join(', ') : 'None'}.\n\n`;
+    onMessageChunk('Aarav', finalResponse);
 
-    for (const agentName of plan.agent_flow) {
+    // --- STEP 2: Sequential Processing & Debate ---
+    if (relevantAgents.length === 0) {
+      // Casual or unassigned
+      onStatusUpdate('Aarav', 'Responding directly...');
+      const casualResp = await chatWithAgent(history, userMessage, getAgentPersona('Aarav'), 'Aarav', { signal });
+      onMessageChunk('Aarav', casualResp);
+      return finalResponse + `**Aarav:** ${casualResp}`;
+    }
+
+    let accumulatedContext = `User Request: ${userMessage}\n\n`;
+    let agentResponses: { agent: string, response: string }[] = [];
+
+    for (const agentName of relevantAgents) {
       if (signal?.aborted) throw new Error("Process stopped by user.");
       
-      onStatusUpdate(agentName, agentName === 'Pooja' ? 'Conducting QA...' : agentName === 'Cipher' ? 'Red Team Analysis...' : agentName === 'Maya' ? 'Simulating Live Preview...' : 'Building...');
+      onStatusUpdate(agentName, 'Processing and thinking...');
       
-      // Use RAG to fetch context relevant to the specific task
-      let specificTask = "";
-      if (agentName === 'Vikram') specificTask = `Implement backend logic using ${plan.tech_stack.backend}.`;
-      else if (agentName === 'Neha') specificTask = `Build frontend UI using ${plan.tech_stack.frontend}.`;
-      else if (agentName === 'Kunal') specificTask = `DevOps configuration for ${plan.tech_stack.deployment}.`;
-      else if (agentName === 'Cipher') specificTask = `Red Team attack analysis on ${plan.tech_stack.backend}.`;
-      else if (agentName === 'Maya') specificTask = `Run the code generated by Neha/Vikram in a simulated browser. Check for CSS issues and mobile responsiveness.`;
-      else specificTask = `Quality Assurance check on ${lastActiveAgent}.`;
+      // Retrieve memory for this specific agent
+      const recentMemories = await AgentMemoryService.getMemories(agentName, 3);
+      const memoryContext = recentMemories.length > 0 
+        ? `\nYour Recent Memories on related topics:\n${recentMemories.map(m => `- ${m.topic}: ${m.summary}`).join('\n')}`
+        : '';
 
-      const memoryContext = await MemoryController.retrieveRelevantContext(agentName, specificTask);
-      let taskSuffix = "";
-      let taskSkills: string[] = [];
-      const isBuilder = ['Vikram', 'Neha', 'Kunal', 'Zara', 'Aryan', 'Karan'].includes(agentName);
+      const agentPrompt = `
+        ${accumulatedContext}
+        ${memoryContext}
+        
+        Task: Provide your expert response or code based on your role. If previous agents have responded, you can agree, disagree, or build upon their work.
+        State your confidence level (High/Medium/Low) at the end of your response.
+      `;
 
-      if (agentName === 'Vikram') {
-        specificTask = `Implement backend logic. Stack: ${plan.tech_stack.backend}, DB: ${plan.tech_stack.database}.`;
-        taskSkills = ['backend', plan.tech_stack.backend, plan.tech_stack.database];
-      }
-      if (agentName === 'Neha') {
-        specificTask = `Build UI components. Stack: ${plan.tech_stack.frontend}.`;
-        taskSkills = ['frontend', plan.tech_stack.frontend];
-      }
-      if (agentName === 'Kunal') {
-        specificTask = `Setup Security & DevOps. Stack: ${plan.tech_stack.deployment}. Analyze data and optimize security.`;
-        taskSkills = ['devops', 'security', plan.tech_stack.deployment];
-      }
+      const response = await chatWithAgent([], agentPrompt, getAgentPersona(agentName), agentName, { signal });
+      onMessageChunk(agentName, response);
       
-      if (agentName === 'Pooja') {
-        specificTask = `Audit work of ${lastActiveAgent}. Check against requirements: ${arjunSummary}. Ask user if implementation is correct.`;
-        taskSuffix = `\nOutput JSON signal for memory learning.`;
-        taskSkills = ['qa', 'testing'];
-      }
+      agentResponses.push({ agent: agentName, response });
+      accumulatedContext += `[${agentName}'s Response]:\n${response}\n\n`;
+      finalResponse += `**${agentName}:**\n${response}\n\n`;
+    }
 
-      if (agentName === 'Cipher') {
-        specificTask = `Conduct Red Team analysis on the proposed architecture and stack (${plan.tech_stack.backend}/${plan.tech_stack.frontend}). Identify critical vulnerabilities, potential exploits, and suggest hardening measures.`;
-        taskSkills = ['security', 'redteam'];
-      }
+    // --- STEP 3: Synthesis (If Debate/Multiple Agents) ---
+    if (relevantAgents.length > 1) {
+      onStatusUpdate('Aarav', 'Synthesizing final response...');
+      const synthesisPrompt = `
+        The user asked: "${userMessage}"
+        The team provided the following responses:
+        ${accumulatedContext}
+        
+        Task: Synthesize these responses into a final, cohesive answer for the user. Resolve any conflicts.
+      `;
+      const synthesis = await chatWithAgent([], synthesisPrompt, getAgentPersona('Aarav'), 'Aarav', { signal });
+      onMessageChunk('Aarav', synthesis);
+      finalResponse += `**Aarav (Synthesis):**\n${synthesis}\n\n`;
+    }
 
-      if (agentName === 'Maya') {
-        specificTask = `Simulate a Live Preview of the code generated by Neha. Provide a description of what the user sees, and log any visual errors or console warnings. Suggest specific CSS fixes if needed.`;
-        taskSkills = ['testing', 'frontend', 'css'];
-      }
-
-      const fullPrompt = `Execute Task: ${specificTask}\n${memoryContext}\n${taskSuffix}`;
+    // --- STEP 4: Memory System (Learning) ---
+    if (shouldSaveMemory || messageType === 'learning') {
+      onStatusUpdate('System', 'Saving to Agent Memory...');
       
-      // Use generateVerifiedCode for builders to ensure syntax correctness
-      let agentResponse = "";
-      if (isBuilder) {
-         agentResponse = await generateVerifiedCode(agentName, fullPrompt, signal);
-      } else {
-         agentResponse = await chatWithAgent(
-            [{ role: 'user', parts: [{ text: accumulatedContext }] }],
-            fullPrompt,
-            getAgentPersona(agentName),
-            agentName,
-            { signal }
-         );
+      for (const agentName of relevantAgents) {
+        // Find the agent's specific response to summarize, or summarize the whole context
+        const agentResp = agentResponses.find(r => r.agent === agentName)?.response || userMessage;
+        
+        // In a real scenario, a dedicated Memory Manager Agent would summarize this.
+        // For now, we save a structured entry directly.
+        await AgentMemoryService.saveMemory(agentName, {
+          topic: topic || 'General Learning',
+          summary: `Learned from user input: ${userMessage.substring(0, 100)}... Agent concluded: ${agentResp.substring(0, 100)}...`,
+          connections: [messageType],
+          confidence: 'high'
+        });
       }
-      
-      onMessageChunk(agentName, agentResponse);
-      
-      // Award XP
-      MemoryController.addExperience(agentName, 100, taskSkills);
-
-      // Handle Memory Learning (simplified for brevity)
-      if (agentName === 'Pooja') {
-          // Logic to parse Pooja's JSON and update memory would go here
-      } else {
-        lastActiveAgent = agentName;
-      }
-
-      accumulatedContext += `\n\n[${agentName}]: ${agentResponse}`;
-      finalResponse += `**${agentName}:**\n${agentResponse}\n\n`;
+      finalResponse += `*(System: Learning data saved to memory for ${relevantAgents.join(', ')})*\n`;
     }
 
     onStatusUpdate('System', 'Cycle Complete');

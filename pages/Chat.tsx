@@ -11,6 +11,7 @@ import { Orchestrator } from '../services/orchestrator';
 import { generateShadowCritique } from '../services/geminiService';
 import { LearningService, DiaryEntry } from '../services/learningService';
 import { MemoryController } from '../services/memoryService';
+import { StorageService } from '../services/storageService';
 import { useNavigate } from 'react-router-dom';
 import { Markdown } from '../components/Markdown';
 import { ActivityLogPanel } from '../components/ActivityLogPanel';
@@ -89,38 +90,53 @@ const Chat = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem('currentProject');
-    if (stored) {
-      try {
-        const proj = JSON.parse(stored);
-        setProject(proj);
-        
-        if (messages.length === 0) {
-          if (proj.description) {
-            const initialUserMsg: Message = {
-              id: Date.now().toString(),
-              role: 'user',
-              text: `Building: ${proj.description}`,
-              timestamp: Date.now()
-            };
-            setMessages([initialUserMsg]);
-            processOrchestratedMessage(initialUserMsg.text, []);
+    const initProject = async () => {
+      const stored = localStorage.getItem('currentProject');
+      if (stored) {
+        try {
+          const localProj = JSON.parse(stored);
+          // Load full project data (including files) from Firestore
+          const fullProj = await StorageService.getProject(localProj.id);
+          
+          if (fullProj) {
+            setProject(fullProj);
+            // Update local storage with fresh data
+            localStorage.setItem('currentProject', JSON.stringify(fullProj));
+            
+            if (messages.length === 0) {
+              if (fullProj.description) {
+                const initialUserMsg: Message = {
+                  id: Date.now().toString(),
+                  role: 'user',
+                  text: `Building: ${fullProj.description}`,
+                  timestamp: Date.now()
+                };
+                setMessages([initialUserMsg]);
+                processOrchestratedMessage(initialUserMsg.text, []);
+              } else {
+                setMessages([{
+                  id: 'welcome',
+                  role: 'model',
+                  text: "Ready to build. Describe your project requirements to start.",
+                  timestamp: Date.now(),
+                  agentName: 'SYSTEM'
+                }]);
+              }
+            }
           } else {
-            setMessages([{
-              id: 'welcome',
-              role: 'model',
-              text: "Ready to build. Describe your project requirements to start.",
-              timestamp: Date.now(),
-              agentName: 'SYSTEM'
-            }]);
+             // Fallback to local if fetch fails or returns null
+             setProject(localProj);
           }
+        } catch (e) {
+          console.error("Failed to init project", e);
+          navigate('/projects');
         }
-      } catch (e) {
+      } else {
         navigate('/projects');
       }
-    } else {
-      navigate('/projects');
-    }
+    };
+    
+    initProject();
   }, []);
 
   // Simulated Console Logs
