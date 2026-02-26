@@ -163,6 +163,13 @@ const FileTreeItem = ({
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDropInternal}
           onContextMenu={handleContextMenu}
+          onKeyDown={(e) => {
+            if (e.key === 'F2') {
+              e.stopPropagation();
+              setRenamingId(node.path);
+              setRenameValue(node.name);
+            }
+          }}
           className={`
             group flex items-center gap-1 py-1 px-2 cursor-pointer transition-all duration-150 text-sm relative border-l-2
             ${isSelected ? 'bg-zinc-800/80 text-orange-400 border-orange-500' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 border-transparent'}
@@ -284,6 +291,41 @@ const CodeGenerator = () => {
   const [splitView, setSplitView] = useState(false);
   const [minimapEnabled, setMinimapEnabled] = useState(true);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Expand/Collapse Persistence
+  useEffect(() => {
+    const saved = localStorage.getItem('expandedFolders');
+    if (saved) {
+      try {
+        setExpandedFolders(new Set(JSON.parse(saved)));
+      } catch (e) {
+        console.error("Failed to parse expandedFolders", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('expandedFolders', JSON.stringify(Array.from(expandedFolders)));
+  }, [expandedFolders]);
+
+  const handleExpandAll = () => {
+    const allFolders = new Set<string>(['root']);
+    const traverse = (nodes: any) => {
+      Object.values(nodes).forEach((node: any) => {
+        if (node.type === 'folder') {
+          allFolders.add(node.path);
+          traverse(node.children);
+        }
+      });
+    };
+    traverse(fileTree.children);
+    setExpandedFolders(allFolders);
+  };
+
+  const handleCollapseAll = () => {
+    setExpandedFolders(new Set(['root']));
+  };
 
   const searchResults = useMemo(() => {
     if (!searchTerm) return null;
@@ -439,12 +481,18 @@ const CodeGenerator = () => {
     handleSave();
   };
 
-  const handleDelete = (path: string) => {
-    if (!window.confirm(`Delete ${path}? This cannot be undone.`)) return;
+  const handleDeleteRequest = (path: string) => {
+    setDeleteConfirm(path);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (!deleteConfirm) return;
+    const path = deleteConfirm;
     setFiles(prev => prev.filter(f => f.name !== path && !f.name.startsWith(path + '/')));
     setOpenFiles(prev => prev.filter(f => f !== path && !f.startsWith(path + '/')));
     if (activeFile === path || activeFile?.startsWith(path + '/')) setActiveFile(null);
     handleSave();
+    setDeleteConfirm(null);
   };
 
   const handleDragDrop = (e: React.DragEvent, targetNode: any) => {
@@ -556,17 +604,18 @@ const CodeGenerator = () => {
       )}
       
       {/* Sidebar */}
-      <div className={`fixed md:relative z-30 h-full bg-[#141414] border-r border-zinc-800 transition-all duration-300 flex flex-col ${isSidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full md:w-0 md:translate-x-0'}`}>
-        <div className="h-10 flex items-center justify-between px-3 border-b border-zinc-800 bg-[#141414]">
+      <div className={`fixed md:relative z-40 h-full bg-[#141414] border-r border-zinc-800 transition-all duration-300 flex flex-col overflow-hidden ${isSidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full md:w-0 md:translate-x-0'}`}>
+        <div className="h-10 flex items-center justify-between px-3 border-b border-zinc-800 bg-[#141414] shrink-0">
           <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Explorer</span>
           <div className="flex items-center gap-1">
              <button onClick={() => setShowSearch(!showSearch)} className="p-1 hover:bg-zinc-800 rounded text-zinc-400"><SearchIcon size={14} /></button>
-             <button onClick={() => setExpandedFolders(new Set())} className="p-1 hover:bg-zinc-800 rounded text-zinc-400"><Minimize2 size={14} /></button>
+             <button onClick={handleExpandAll} className="p-1 hover:bg-zinc-800 rounded text-zinc-400" title="Expand All"><Maximize2 size={14} /></button>
+             <button onClick={handleCollapseAll} className="p-1 hover:bg-zinc-800 rounded text-zinc-400" title="Collapse All"><Minimize2 size={14} /></button>
           </div>
         </div>
 
         {showSearch && (
-          <div className="p-2 border-b border-zinc-800">
+          <div className="p-2 border-b border-zinc-800 shrink-0">
             <div className="flex items-center bg-zinc-900 border border-zinc-700 rounded px-2 py-1">
               <SearchIcon size={12} className="text-zinc-500" />
               <input 
@@ -620,34 +669,49 @@ const CodeGenerator = () => {
                {searchResults.length === 0 && <div className="text-zinc-500 text-xs text-center py-4">No results found</div>}
             </div>
           ) : (
-            <FileTreeItem 
-              node={fileTree} 
-              level={-1}
-              selectedFile={activeFile}
-              expandedFolders={expandedFolders}
-              onToggle={(path: string) => setExpandedFolders(prev => {
-                const next = new Set(prev);
-                if (next.has(path)) next.delete(path); else next.add(path);
-                return next;
-              })}
-              onSelect={(file: any) => {
-                if (!openFiles.includes(file.name)) setOpenFiles(prev => [...prev, file.name]);
-                setActiveFile(file.name);
-                if (window.innerWidth < 768) setIsSidebarOpen(false);
-              }}
-              onContextMenu={(e: any, node: any) => setContextMenu({ x: e.clientX, y: e.clientY, type: node.type, path: node.path })}
-              renamingId={renamingId}
-              setRenamingId={setRenamingId}
-              onRenameSubmit={handleRenameSubmit}
-              creatingState={creatingState}
-              setCreatingState={setCreatingState}
-              onCreateSubmit={handleCreateSubmit}
-              onDragStart={(e: any, node: any) => e.dataTransfer.setData('text/plain', node.path)}
-              onDrop={handleDragDrop}
-            />
+            files.length === 0 ? (
+              <div className="text-zinc-500 text-xs text-center py-4 px-2">
+                No files found. <br/>
+                <span className="text-[10px] opacity-70">Right-click to create or upload.</span>
+              </div>
+            ) : (
+              <FileTreeItem 
+                node={fileTree} 
+                level={-1}
+                selectedFile={activeFile}
+                expandedFolders={expandedFolders}
+                onToggle={(path: string) => setExpandedFolders(prev => {
+                  const next = new Set(prev);
+                  if (next.has(path)) next.delete(path); else next.add(path);
+                  return next;
+                })}
+                onSelect={(file: any) => {
+                  if (!openFiles.includes(file.name)) setOpenFiles(prev => [...prev, file.name]);
+                  setActiveFile(file.name);
+                  if (window.innerWidth < 768) setIsSidebarOpen(false);
+                }}
+                onContextMenu={(e: any, node: any) => setContextMenu({ x: e.clientX, y: e.clientY, type: node.type, path: node.path })}
+                renamingId={renamingId}
+                setRenamingId={setRenamingId}
+                onRenameSubmit={handleRenameSubmit}
+                creatingState={creatingState}
+                setCreatingState={setCreatingState}
+                onCreateSubmit={handleCreateSubmit}
+                onDragStart={(e: any, node: any) => e.dataTransfer.setData('text/plain', node.path)}
+                onDrop={handleDragDrop}
+              />
+            )
           )}
         </div>
       </div>
+
+      {/* Mobile Floating Toggle (Safety Net) */}
+      <button 
+        className="md:hidden fixed bottom-4 right-4 z-50 bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-500 transition-all"
+        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+      >
+        <Menu size={20} />
+      </button>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
@@ -819,6 +883,20 @@ const CodeGenerator = () => {
 
       </div>
 
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg shadow-xl w-80">
+            <h3 className="text-sm font-bold text-white mb-2">Delete Item?</h3>
+            <p className="text-xs text-zinc-400 mb-4">Are you sure you want to delete <span className="text-white font-mono">{deleteConfirm}</span>? This cannot be undone.</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" className="text-xs h-8" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+              <Button className="bg-red-600 hover:bg-red-500 text-white text-xs h-8" onClick={handleDeleteConfirm}>Delete</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenu 
@@ -833,7 +911,7 @@ const CodeGenerator = () => {
             ] : []),
             ...(contextMenu.type !== 'root' && contextMenu.type !== 'tab' ? [
               { label: 'Rename', icon: Edit2, action: () => setRenamingId(contextMenu.path!) },
-              { label: 'Delete', icon: Trash2, danger: true, action: () => handleDelete(contextMenu.path!) },
+              { label: 'Delete', icon: Trash2, danger: true, action: () => handleDeleteRequest(contextMenu.path!) },
             ] : []),
             ...(contextMenu.type === 'tab' ? [
               { label: 'Close', icon: X, action: () => setOpenFiles(prev => prev.filter(p => p !== contextMenu.path)) },
