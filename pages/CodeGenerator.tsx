@@ -283,6 +283,31 @@ const CodeGenerator = () => {
   const [showSearch, setShowSearch] = useState(false);
   const [splitView, setSplitView] = useState(false);
   const [minimapEnabled, setMinimapEnabled] = useState(true);
+  const [showUploadMenu, setShowUploadMenu] = useState(false);
+
+  const searchResults = useMemo(() => {
+    if (!searchTerm) return null;
+    const results: { file: any, matches: { line: number, content: string }[] }[] = [];
+    files.forEach(f => {
+      if (f.type === 'folder') return;
+      const lowerTerm = searchTerm.toLowerCase();
+      const matches: { line: number, content: string }[] = [];
+      
+      if (f.content) {
+        const lines = f.content.split('\n');
+        lines.forEach((line: string, i: number) => {
+          if (line.toLowerCase().includes(lowerTerm)) {
+            matches.push({ line: i + 1, content: line.trim().substring(0, 60) });
+          }
+        });
+      }
+      
+      if (matches.length > 0 || f.name.toLowerCase().includes(lowerTerm)) {
+        results.push({ file: f, matches: matches.slice(0, 3) });
+      }
+    });
+    return results;
+  }, [files, searchTerm]);
   
   // Context Menu & Operations
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -447,21 +472,53 @@ const CodeGenerator = () => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
     const newFiles: any[] = [];
+    let duplicateCount = 0;
     
     for (const file of Array.from(fileList)) {
       const text = await file.text();
       const path = (file as any).webkitRelativePath || file.name;
       const cleanPath = (activeFile ? activeFile.split('/').slice(0, -1).join('/') + '/' : '') + path;
+      
+      if (files.some(f => f.name === cleanPath)) {
+        duplicateCount++;
+        // For now, we skip duplicates or could ask. 
+        // Requirement says "Detect and warn". 
+        // We'll skip for now and warn at the end.
+        continue;
+      }
+      
       newFiles.push({ name: cleanPath, content: text, type: 'file', language: getFileInfo(cleanPath).lang });
+    }
+
+    if (duplicateCount > 0) {
+       if (!window.confirm(`Found ${duplicateCount} duplicate files. Skip them? (Cancel to overwrite)`)) {
+          // If user cancels, we overwrite (re-process without check)
+          // Re-looping for simplicity of this block
+           for (const file of Array.from(fileList)) {
+              const text = await file.text();
+              const path = (file as any).webkitRelativePath || file.name;
+              const cleanPath = (activeFile ? activeFile.split('/').slice(0, -1).join('/') + '/' : '') + path;
+              // Add or replace
+              const existingIdx = newFiles.findIndex(f => f.name === cleanPath);
+              if (existingIdx >= 0) newFiles[existingIdx] = { name: cleanPath, content: text, type: 'file', language: getFileInfo(cleanPath).lang };
+              else newFiles.push({ name: cleanPath, content: text, type: 'file', language: getFileInfo(cleanPath).lang });
+           }
+       }
     }
 
     setFiles(prev => {
       const existing = new Set(prev.map(f => f.name));
-      const filtered = newFiles.filter(f => !existing.has(f.name));
-      return [...prev, ...filtered];
+      // If we are overwriting, we need to filter out old ones that are being replaced
+      const newFileNames = new Set(newFiles.map(f => f.name));
+      const keptOld = prev.filter(f => !newFileNames.has(f.name));
+      return [...keptOld, ...newFiles];
     });
     showToast(`Uploaded ${newFiles.length} files`, "success");
     handleSave();
+    
+    // Reset inputs
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (folderInputRef.current) folderInputRef.current.value = '';
   };
 
   const handleDownloadZip = async () => {
@@ -490,8 +547,16 @@ const CodeGenerator = () => {
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 text-white font-sans" onContextMenu={(e) => e.preventDefault()}>
       
+      {/* Mobile Backdrop */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-20 md:hidden" 
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+      
       {/* Sidebar */}
-      <div className={`${isSidebarOpen ? 'w-64' : 'w-0'} flex-shrink-0 bg-[#141414] border-r border-zinc-800 transition-all duration-300 flex flex-col`}>
+      <div className={`fixed md:relative z-30 h-full bg-[#141414] border-r border-zinc-800 transition-all duration-300 flex flex-col ${isSidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full md:w-0 md:translate-x-0'}`}>
         <div className="h-10 flex items-center justify-between px-3 border-b border-zinc-800 bg-[#141414]">
           <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Explorer</span>
           <div className="flex items-center gap-1">
@@ -522,30 +587,65 @@ const CodeGenerator = () => {
             setContextMenu({ x: e.clientX, y: e.clientY, type: 'root', path: '' });
           }}
         >
-          <FileTreeItem 
-            node={fileTree} 
-            level={-1}
-            selectedFile={activeFile}
-            expandedFolders={expandedFolders}
-            onToggle={(path: string) => setExpandedFolders(prev => {
-              const next = new Set(prev);
-              if (next.has(path)) next.delete(path); else next.add(path);
-              return next;
-            })}
-            onSelect={(file: any) => {
-              if (!openFiles.includes(file.name)) setOpenFiles(prev => [...prev, file.name]);
-              setActiveFile(file.name);
-            }}
-            onContextMenu={(e: any, node: any) => setContextMenu({ x: e.clientX, y: e.clientY, type: node.type, path: node.path })}
-            renamingId={renamingId}
-            setRenamingId={setRenamingId}
-            onRenameSubmit={handleRenameSubmit}
-            creatingState={creatingState}
-            setCreatingState={setCreatingState}
-            onCreateSubmit={handleCreateSubmit}
-            onDragStart={(e: any, node: any) => e.dataTransfer.setData('text/plain', node.path)}
-            onDrop={handleDragDrop}
-          />
+          {searchTerm && searchResults ? (
+            <div className="p-2 space-y-2">
+               {searchResults.map((res, i) => (
+                 <div key={i} className="flex flex-col gap-1">
+                    <div 
+                      className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer hover:text-white"
+                      onClick={() => {
+                        if (!openFiles.includes(res.file.name)) setOpenFiles(prev => [...prev, res.file.name]);
+                        setActiveFile(res.file.name);
+                        if (window.innerWidth < 768) setIsSidebarOpen(false);
+                      }}
+                    >
+                       <FileText size={14} className="text-zinc-500" />
+                       <span className="font-medium truncate">{res.file.name}</span>
+                    </div>
+                    {res.matches.map((m, j) => (
+                       <div 
+                         key={j} 
+                         className="pl-6 text-xs text-zinc-500 font-mono truncate cursor-pointer hover:text-zinc-400"
+                         onClick={() => {
+                            if (!openFiles.includes(res.file.name)) setOpenFiles(prev => [...prev, res.file.name]);
+                            setActiveFile(res.file.name);
+                            if (window.innerWidth < 768) setIsSidebarOpen(false);
+                         }}
+                       >
+                          {m.line}: {m.content}
+                       </div>
+                    ))}
+                 </div>
+               ))}
+               {searchResults.length === 0 && <div className="text-zinc-500 text-xs text-center py-4">No results found</div>}
+            </div>
+          ) : (
+            <FileTreeItem 
+              node={fileTree} 
+              level={-1}
+              selectedFile={activeFile}
+              expandedFolders={expandedFolders}
+              onToggle={(path: string) => setExpandedFolders(prev => {
+                const next = new Set(prev);
+                if (next.has(path)) next.delete(path); else next.add(path);
+                return next;
+              })}
+              onSelect={(file: any) => {
+                if (!openFiles.includes(file.name)) setOpenFiles(prev => [...prev, file.name]);
+                setActiveFile(file.name);
+                if (window.innerWidth < 768) setIsSidebarOpen(false);
+              }}
+              onContextMenu={(e: any, node: any) => setContextMenu({ x: e.clientX, y: e.clientY, type: node.type, path: node.path })}
+              renamingId={renamingId}
+              setRenamingId={setRenamingId}
+              onRenameSubmit={handleRenameSubmit}
+              creatingState={creatingState}
+              setCreatingState={setCreatingState}
+              onCreateSubmit={handleCreateSubmit}
+              onDragStart={(e: any, node: any) => e.dataTransfer.setData('text/plain', node.path)}
+              onDrop={handleDragDrop}
+            />
+          )}
         </div>
       </div>
 
@@ -557,13 +657,22 @@ const CodeGenerator = () => {
            <div className="flex items-center gap-3">
               <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-zinc-400 hover:text-white"><Menu size={18} /></button>
               <div className="h-4 w-[1px] bg-zinc-700 mx-1" />
-              <Button variant="secondary" className="h-8 text-xs gap-2" onClick={() => fileInputRef.current?.click()}>
-                 <Upload size={14} /> Upload
-              </Button>
+              <div className="relative">
+                <Button variant="secondary" className="h-8 text-xs gap-2" onClick={() => setShowUploadMenu(!showUploadMenu)}>
+                   <Upload size={14} /> Upload
+                </Button>
+                {showUploadMenu && (
+                  <div className="absolute top-full left-0 mt-1 w-32 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl z-50 flex flex-col overflow-hidden">
+                    <button onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false); }} className="px-3 py-2 text-left text-xs hover:bg-zinc-800 text-zinc-300 w-full">Upload Files</button>
+                    <button onClick={() => { folderInputRef.current?.click(); setShowUploadMenu(false); }} className="px-3 py-2 text-left text-xs hover:bg-zinc-800 text-zinc-300 w-full">Upload Folder</button>
+                  </div>
+                )}
+              </div>
               <Button variant="secondary" className="h-8 text-xs gap-2" onClick={handleDownloadZip}>
                  <Download size={14} /> ZIP
               </Button>
               <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+              <input type="file" multiple ref={folderInputRef} className="hidden" onChange={handleFileUpload} {...{ webkitdirectory: "", directory: "" } as any} />
            </div>
            <div className="flex items-center gap-2">
               <Button onClick={() => setIsAppRunning(!isAppRunning)} className={`h-8 text-xs gap-2 ${isAppRunning ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'}`}>
@@ -730,6 +839,7 @@ const CodeGenerator = () => {
               { label: 'Close', icon: X, action: () => setOpenFiles(prev => prev.filter(p => p !== contextMenu.path)) },
               { label: 'Close Others', icon: X, action: () => setOpenFiles([contextMenu.path!]) },
               { label: 'Close All', icon: X, action: () => setOpenFiles([]) },
+              { label: 'Copy Path', icon: Copy, action: () => { navigator.clipboard.writeText(contextMenu.path!); showToast("Path copied", "success"); } },
             ] : [])
           ]}
         />
