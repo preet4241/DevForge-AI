@@ -286,10 +286,11 @@ const Chat = () => {
            </Tooltip>
            <button 
              onClick={() => navigate('/code')}
-             className="hidden sm:flex items-center gap-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+             className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
            >
               <Terminal size={14} className="text-orange-500" />
-              <span>Full IDE</span>
+              <span className="hidden sm:inline">Full IDE</span>
+              <span className="sm:hidden">IDE</span>
            </button>
         </div>
       </header>
@@ -447,11 +448,16 @@ const Chat = () => {
               <div className="h-14 border-b border-zinc-900 flex items-center justify-between px-4 bg-zinc-950 shrink-0">
                  <div className="flex items-center gap-2">
                     <FileCode className="text-orange-500" size={18} />
-                    <h2 className="text-sm font-black text-white uppercase tracking-wider">Artifacts Explorer</h2>
+                    <h2 className="text-sm font-black text-white uppercase tracking-wider">Generated Snippets</h2>
                  </div>
-                 <button onClick={() => setShowArtifacts(false)} className="p-1.5 hover:bg-zinc-900 rounded-lg text-zinc-500 hover:text-white">
-                    <X size={20} />
-                 </button>
+                 <div className="flex items-center">
+                    <button onClick={() => navigate('/code')} className="mr-3 text-[10px] bg-zinc-900 hover:bg-zinc-800 text-orange-500 px-2 py-1 rounded border border-zinc-800 font-bold uppercase tracking-wider transition-colors">
+                       Open IDE
+                    </button>
+                    <button onClick={() => setShowArtifacts(false)} className="p-1.5 hover:bg-zinc-900 rounded-lg text-zinc-500 hover:text-white">
+                       <X size={20} />
+                    </button>
+                 </div>
               </div>
 
               <div className="flex-1 flex flex-col overflow-hidden">

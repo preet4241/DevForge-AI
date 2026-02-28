@@ -43,11 +43,11 @@ const getFileInfo = (fileName: string) => {
   switch (ext) {
     case 'ts': case 'tsx': return { icon: Code2, color: 'text-blue-400', lang: 'typescript' };
     case 'js': case 'jsx': return { icon: FileCode, color: 'text-yellow-400', lang: 'javascript' };
-    case 'css': case 'scss': return { icon: Hash, color: 'text-blue-300', lang: 'css' };
+    case 'css': case 'scss': return { icon: Hash, color: 'text-pink-400', lang: 'css' };
     case 'html': return { icon: FileCode, color: 'text-orange-500', lang: 'html' };
-    case 'json': return { icon: FileJson, color: 'text-yellow-300', lang: 'json' };
-    case 'md': return { icon: FileText, color: 'text-zinc-400', lang: 'markdown' };
-    case 'py': return { icon: FileCode, color: 'text-green-400', lang: 'python' };
+    case 'json': return { icon: FileJson, color: 'text-green-400', lang: 'json' };
+    case 'md': return { icon: FileText, color: 'text-zinc-300', lang: 'markdown' };
+    case 'py': return { icon: FileCode, color: 'text-emerald-400', lang: 'python' };
     default: return { icon: FileType, color: 'text-zinc-500', lang: 'plaintext' };
   }
 };
@@ -670,9 +670,23 @@ const CodeGenerator = () => {
             </div>
           ) : (
             files.length === 0 ? (
-              <div className="text-zinc-500 text-xs text-center py-4 px-2">
-                No files found. <br/>
-                <span className="text-[10px] opacity-70">Right-click to create or upload.</span>
+              <div className="flex flex-col items-center justify-center h-64 text-zinc-500 text-xs text-center px-4">
+                <p className="mb-4">No files found in this project.</p>
+                <Button onClick={() => {
+                   setFiles([
+                      { name: 'src/App.tsx', type: 'file', content: '// App', language: 'typescript' },
+                      { name: 'src/components/Button.tsx', type: 'file', content: '// Button', language: 'typescript' },
+                      { name: 'src/styles/main.css', type: 'file', content: '/* CSS */', language: 'css' },
+                      { name: 'public/index.html', type: 'file', content: '<!-- HTML -->', language: 'html' },
+                      { name: 'README.md', type: 'file', content: '# Demo Project', language: 'markdown' },
+                   ]);
+                   setExpandedFolders(new Set(['root', 'src', 'src/components', 'src/styles', 'public']));
+                }}>
+                  Load Demo Files
+                </Button>
+                <p className="mt-4 text-[10px] opacity-60">
+                  Or right-click to create new files/folders.
+                </p>
               </div>
             ) : (
               <FileTreeItem 
@@ -703,49 +717,63 @@ const CodeGenerator = () => {
             )
           )}
         </div>
-      </div>
 
-      {/* Mobile Floating Toggle (Safety Net) */}
-      <button 
-        className="md:hidden fixed bottom-4 right-4 z-50 bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-500 transition-all"
-        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-      >
-        <Menu size={20} />
-      </button>
+        {/* Sidebar Footer */}
+        <div className="p-2 border-t border-zinc-800 flex gap-2 shrink-0 bg-[#141414]">
+          <button 
+            onClick={() => setCreatingState({ parentPath: '', type: 'file' })}
+            className="flex-1 flex items-center justify-center gap-2 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded text-xs text-zinc-400 hover:text-white transition-colors"
+          >
+            <FilePlus size={14} /> New File
+          </button>
+          <button 
+            onClick={() => setCreatingState({ parentPath: '', type: 'folder' })}
+            className="flex-1 flex items-center justify-center gap-2 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded text-xs text-zinc-400 hover:text-white transition-colors"
+          >
+            <FolderPlus size={14} /> New Folder
+          </button>
+        </div>
+      </div>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
         
         {/* Top Bar */}
-        <div className="h-12 bg-[#141414] border-b border-zinc-800 flex items-center justify-between px-4">
-           <div className="flex items-center gap-3">
-              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-zinc-400 hover:text-white"><Menu size={18} /></button>
-              <div className="h-4 w-[1px] bg-zinc-700 mx-1" />
-              <div className="relative">
-                <Button variant="secondary" className="h-8 text-xs gap-2" onClick={() => setShowUploadMenu(!showUploadMenu)}>
-                   <Upload size={14} /> Upload
-                </Button>
-                {showUploadMenu && (
-                  <div className="absolute top-full left-0 mt-1 w-32 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl z-50 flex flex-col overflow-hidden">
-                    <button onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false); }} className="px-3 py-2 text-left text-xs hover:bg-zinc-800 text-zinc-300 w-full">Upload Files</button>
-                    <button onClick={() => { folderInputRef.current?.click(); setShowUploadMenu(false); }} className="px-3 py-2 text-left text-xs hover:bg-zinc-800 text-zinc-300 w-full">Upload Folder</button>
-                  </div>
-                )}
-              </div>
-              <Button variant="secondary" className="h-8 text-xs gap-2" onClick={handleDownloadZip}>
-                 <Download size={14} /> ZIP
-              </Button>
-              <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-              <input type="file" multiple ref={folderInputRef} className="hidden" onChange={handleFileUpload} {...{ webkitdirectory: "", directory: "" } as any} />
-           </div>
+        <div className="h-14 bg-[#141414] border-b border-zinc-800 flex items-center justify-between px-4 shrink-0">
            <div className="flex items-center gap-2">
-              <Button onClick={() => setIsAppRunning(!isAppRunning)} className={`h-8 text-xs gap-2 ${isAppRunning ? 'bg-red-600 hover:bg-red-500' : 'bg-green-600 hover:bg-green-500'}`}>
-                 {isAppRunning ? <Square size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-                 {isAppRunning ? 'Stop' : 'Run'}
+              <button 
+                onClick={() => navigate('/chat')} 
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+                title="Back to Chat"
+              >
+                 <ArrowLeft size={18} />
+              </button>
+              <div className="h-6 w-[1px] bg-zinc-800 mx-1" />
+              <button 
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+                title="Toggle Sidebar"
+              >
+                 <Menu size={18} />
+              </button>
+              <Button variant="secondary" className="h-9 text-xs gap-2 ml-2" onClick={handleDownloadZip}>
+                 <Download size={16} /> <span className="hidden sm:inline">Download</span>
               </Button>
-              <Button variant="secondary" className="h-8 w-8 p-0" onClick={() => setShowConsole(!showConsole)}><Terminal size={14} /></Button>
-              <Button variant="secondary" className="h-8 w-8 p-0" onClick={() => setSplitView(!splitView)}><Split size={14} /></Button>
            </div>
+           
+           <div className="flex items-center gap-2">
+              <Button 
+                onClick={() => setIsAppRunning(!isAppRunning)} 
+                className={`h-9 px-4 text-xs gap-2 font-medium transition-all ${isAppRunning ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/20' : 'bg-green-600 hover:bg-green-500 text-white shadow-green-900/20'} shadow-lg`}
+              >
+                 {isAppRunning ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+                 {isAppRunning ? 'Stop App' : 'Run App'}
+              </Button>
+           </div>
+
+           {/* Hidden Inputs for Context Menu Uploads */}
+           <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+           <input type="file" multiple ref={folderInputRef} className="hidden" onChange={handleFileUpload} {...{ webkitdirectory: "", directory: "" } as any} />
         </div>
 
         {/* Tabs */}

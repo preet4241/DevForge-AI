@@ -176,8 +176,8 @@ export class LearningService {
   }
 
   /**
-   * Simulates a multi-agent group discussion using STREAMING.
-   * This ensures immediate feedback and a typing effect.
+   * Simulates a multi-agent group discussion using TRUE A2A (Agent-to-Agent) communication.
+   * Agents speak sequentially, reading the previous context, with delays to prevent 429 errors.
    */
   static async startTeamDiscussion(
     content: string, 
@@ -186,45 +186,14 @@ export class LearningService {
     fileName?: string,
     useRawMode: boolean = false
   ) {
-    // 1. Construct the Group Chat Simulation Prompt
-    const prompt = `
-    CONTEXT: EDUCATIONAL CODE ANALYSIS & SECURITY RESEARCH.
-    OBJECTIVE: Analyze the User's input (Code/Idea) to understand its INTERNAL MECHANICS, LOGIC FLOW, and ARCHITECTURE.
-    
-    If the user provides a script (e.g., login automation, scraping, tool):
-    1. DO NOT REFUSE TO ANALYZE. Instead, explain *how* it works technically.
-    2. Analyze the specific API calls, headers, or logic being used.
-    3. Discuss the *technical* implications.
-    4. If risky, Cipher (Red Team) should explain *why* it's detected/blocked.
+    const agents = [
+      { name: 'Aarav', role: 'Product Manager', focus: 'Analyze the core function, user intent, and overall goal. What is the user trying to achieve?' },
+      { name: 'Rohit', role: 'Architect', focus: 'Analyze the architecture, data flow, and APIs based on the input and previous analysis.' },
+      { name: 'Cipher', role: 'Security Expert', focus: 'Analyze security risks, vulnerabilities, rate limits, and how target systems might detect this.' },
+      { name: 'Vikram', role: 'Backend Engineer', focus: 'Summarize the technical implementation details, logic, and suggest concrete improvements.' }
+    ];
 
-    USER INPUT: "${content}"
-    ATTACHMENT: ${fileName || 'None'}
-
-    THE SQUAD (AGENTS):
-    - Aarav (Product): "What is the core function? Is this user-friendly?"
-    - Rohit (Architect): "How is the data flowing? What APIs are involved?"
-    - Vikram (Backend): "Analyze the logic. How does the authentication work?"
-    - Kunal (DevOps): "Is this efficient? What are the rate limits?"
-    - Cipher (Red Team): "Security Analysis. How does the target system detect this? What are the vulnerabilities?"
-
-    RULES:
-    1. INTERACTIVE DEBATE: Agents talk to each other.
-    2. RAW TECHNICAL TRUTH: Don't preach. Analyze the code provided.
-    3. FORMAT: You MUST use the format: [AgentName]: Message...
-    
-    Start the debate immediately.
-    `;
-
-    // 2. Add image if present
-    let parts: any[] = [{ text: prompt }];
-    if (imageData) {
-       parts.push({
-        inlineData: {
-          mimeType: "image/jpeg",
-          data: imageData.split(',')[1]
-        }
-      });
-    }
+    let fullTranscript = `USER INPUT: "${content}"\nATTACHMENT: ${fileName || 'None'}\n\n--- DISCUSSION START ---\n\n`;
 
     try {
       const apiKey = process.env.API_KEY;
@@ -233,70 +202,76 @@ export class LearningService {
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      
-      // Use stable 2.5 Flash for reliable streaming
-      const streamResponse = await ai.models.generateContentStream({
-        model: 'gemini-2.5-flash-latest', 
-        contents: { parts },
-        // removed thinkingConfig to prevent errors
-      });
 
-      if (!streamResponse) {
-        throw new Error("No response from AI model.");
-      }
-
-      let buffer = "";
-      let currentAgent = "";
-      let fullTranscript = "";
-
-      // 3. Process Stream Chunk-by-Chunk
-      for await (const chunk of streamResponse) {
-        const chunkText = chunk.text; // Direct access via getter
-        if (!chunkText) continue;
+      for (let i = 0; i < agents.length; i++) {
+        const agent = agents[i];
         
-        buffer += chunkText;
-        fullTranscript += chunkText;
+        const prompt = `
+        CONTEXT: EDUCATIONAL CODE ANALYSIS & SECURITY RESEARCH.
+        OBJECTIVE: Analyze the User's input (Code/Idea) to understand its INTERNAL MECHANICS, LOGIC FLOW, and ARCHITECTURE.
+        
+        You are ${agent.name}, the ${agent.role}.
+        Your specific focus for this turn: ${agent.focus}
+        
+        Here is the discussion so far:
+        ${fullTranscript}
+        
+        INSTRUCTIONS:
+        1. Read the user input and the previous agents' thoughts.
+        2. Provide your expert analysis based on your specific focus.
+        3. Speak directly to the team or the user. Keep it concise, technical, and insightful (1-2 short paragraphs).
+        4. DO NOT output your name at the beginning (e.g., don't write "${agent.name}:"). Just write your response.
+        `;
 
-        // Regex to find [Name]: 
-        const parts = buffer.split(/\[(Aarav|Rohit|Vikram|Neha|Kunal|Pooja|Cipher|System)\]:\s*/);
+        let parts: any[] = [{ text: prompt }];
+        if (imageData && i === 0) { // Only send image to the first agent to save bandwidth/tokens, or send to all? Let's send to all for context.
+           parts.push({
+            inlineData: {
+              mimeType: "image/jpeg",
+              data: imageData.split(',')[1]
+            }
+          });
+        }
 
-        if (parts.length > 1) {
-           if (currentAgent && parts[0]) {
-              onAgentSpeak(currentAgent, parts[0], false);
-           }
+        const streamResponse = await ai.models.generateContentStream({
+          model: 'gemini-2.5-flash-latest', 
+          contents: { parts }
+        });
 
-           for (let i = 1; i < parts.length; i += 2) {
-              const newAgent = parts[i];
-              const newText = parts[i+1];
-              
-              if (newAgent) {
-                 currentAgent = newAgent;
-                 if (newText) {
-                    onAgentSpeak(currentAgent, newText, true);
-                 }
-              }
-           }
-           buffer = ""; 
-        } else {
-           if (currentAgent) {
-              onAgentSpeak(currentAgent, buffer, false);
-              buffer = "";
-           }
+        if (!streamResponse) {
+          throw new Error(`No response from AI model for ${agent.name}.`);
+        }
+
+        let agentResponse = "";
+        let isFirstChunk = true;
+
+        for await (const chunk of streamResponse) {
+          const chunkText = chunk.text;
+          if (!chunkText) continue;
+          
+          agentResponse += chunkText;
+          onAgentSpeak(agent.name, chunkText, isFirstChunk);
+          isFirstChunk = false;
+        }
+
+        fullTranscript += `[${agent.name}]: ${agentResponse}\n\n`;
+
+        // Delay to prevent 429 Rate Limit errors (3 seconds)
+        if (i < agents.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
       }
 
-      if (buffer && currentAgent) {
-         onAgentSpeak(currentAgent, buffer, false);
-      }
-
-      // 4. Extract Knowledge (Background process)
+      // Extract Knowledge (Background process)
       if (fullTranscript.length > 100) {
-         this.extractKnowledge(fullTranscript, imageData);
+         // Add a small delay before the final extraction call to be safe
+         setTimeout(() => {
+             this.extractKnowledge(fullTranscript, imageData);
+         }, 4000);
       }
 
     } catch (e: any) {
       console.error("Team discussion failed", e);
-      // Safely handle errors
       const errorMessage = e.message || "Unknown error";
       onAgentSpeak('System', `Connection interrupted: ${errorMessage}. Please check API key or try again.`, true);
     }
