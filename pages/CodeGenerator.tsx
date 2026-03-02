@@ -205,7 +205,67 @@ const FileTreeItem = ({
               className="bg-zinc-950 border border-orange-500 rounded px-1 py-0.5 text-xs text-white w-full outline-none"
             />
           ) : (
-            <span className="truncate flex-1 font-medium">{node.name}</span>
+            <>
+              <span className="truncate flex-1 font-medium">{node.name}</span>
+              {node.type === 'folder' && (
+                <div className="hidden group-hover:flex items-center gap-1 pr-1">
+                  <button 
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      if (!isExpanded) onToggle(node.path);
+                      setCreatingState({ parentPath: node.path, type: 'file' }); 
+                    }}
+                    className="p-0.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white"
+                    title="New File"
+                  >
+                    <FilePlus size={12} />
+                  </button>
+                  <button 
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      if (!isExpanded) onToggle(node.path);
+                      setCreatingState({ parentPath: node.path, type: 'folder' }); 
+                    }}
+                    className="p-0.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white"
+                    title="New Folder"
+                  >
+                    <FolderPlus size={12} />
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setRenamingId(node.path); setRenameValue(node.name); }}
+                    className="p-0.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white"
+                    title="Rename"
+                  >
+                    <Edit2 size={12} />
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onDelete(node.path); }}
+                    className="p-0.5 hover:bg-zinc-700 rounded text-red-400 hover:text-red-300"
+                    title="Delete"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              )}
+              {node.type === 'file' && (
+                <div className="hidden group-hover:flex items-center gap-1 pr-1">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setRenamingId(node.path); setRenameValue(node.name); }}
+                    className="p-0.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white"
+                    title="Rename"
+                  >
+                    <Edit2 size={12} />
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onDelete(node.path); }}
+                    className="p-0.5 hover:bg-zinc-700 rounded text-red-400 hover:text-red-300"
+                    title="Delete"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -721,13 +781,21 @@ const CodeGenerator = () => {
         {/* Sidebar Footer */}
         <div className="p-2 border-t border-zinc-800 flex gap-2 shrink-0 bg-[#141414]">
           <button 
-            onClick={() => setCreatingState({ parentPath: '', type: 'file' })}
+            onClick={() => {
+              const parentPath = activeFile ? (files.find(f => f.name === activeFile)?.type === 'folder' ? activeFile : activeFile.split('/').slice(0, -1).join('/')) : '';
+              if (parentPath) setExpandedFolders(prev => new Set(prev).add(parentPath));
+              setCreatingState({ parentPath, type: 'file' });
+            }}
             className="flex-1 flex items-center justify-center gap-2 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded text-xs text-zinc-400 hover:text-white transition-colors"
           >
             <FilePlus size={14} /> New File
           </button>
           <button 
-            onClick={() => setCreatingState({ parentPath: '', type: 'folder' })}
+            onClick={() => {
+              const parentPath = activeFile ? (files.find(f => f.name === activeFile)?.type === 'folder' ? activeFile : activeFile.split('/').slice(0, -1).join('/')) : '';
+              if (parentPath) setExpandedFolders(prev => new Set(prev).add(parentPath));
+              setCreatingState({ parentPath, type: 'folder' });
+            }}
             className="flex-1 flex items-center justify-center gap-2 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded text-xs text-zinc-400 hover:text-white transition-colors"
           >
             <FolderPlus size={14} /> New Folder

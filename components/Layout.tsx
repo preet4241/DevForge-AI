@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Home, Hammer, Bot, Settings, Zap, FolderKanban, LayoutTemplate, BrainCircuit, Workflow } from 'lucide-react';
+import { Menu, X, Home, Hammer, Bot, Settings, Zap, FolderKanban, LayoutTemplate, BrainCircuit, Workflow, Wrench, Terminal as TerminalIcon, ChevronDown, ChevronRight } from 'lucide-react';
 import { ThreeLoadingScreen } from './ThreeLoadingScreen';
 
 interface LayoutProps {
@@ -35,13 +35,54 @@ const NavItem = ({ to, icon: Icon, label, mobile, badge }: { to: string, icon: a
   );
 };
 
+const ToolsMenu = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const location = useLocation();
+  const isActive = location.pathname === '/terminal';
+
+  return (
+    <div className="space-y-1">
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors focus:ring-2 focus:ring-orange-500 outline-none ${
+          isOpen || isActive
+            ? 'bg-zinc-800 text-white' 
+            : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
+        }`}
+      >
+        <div className="flex items-center space-x-3">
+          <Wrench size={20} aria-hidden="true" />
+          <span className="font-medium">Tools</span>
+        </div>
+        {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </button>
+      
+      {isOpen && (
+        <div className="pl-11 pr-2 py-1 space-y-1">
+          <Link 
+            to="/terminal" 
+            className={`flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${
+              isActive 
+                ? 'bg-orange-600/20 text-orange-500' 
+                : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
+            }`}
+          >
+            <TerminalIcon size={16} aria-hidden="true" />
+            <span className="font-medium text-sm">Terminal</span>
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const location = useLocation();
   
   // Routes that should use the full workspace layout (no sidebar)
-  const isWorkspace = location.pathname === '/chat' || location.pathname === '/code' || location.pathname === '/training' || location.pathname === '/logic';
+  const isWorkspace = location.pathname === '/chat' || location.pathname === '/code' || location.pathname === '/training' || location.pathname === '/logic' || location.pathname === '/terminal';
   const isHome = location.pathname === '/';
 
   React.useEffect(() => {
@@ -90,6 +131,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               
               <div role="separator" className="pt-4 pb-2 px-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Resources</div>
               <NavItem to="/templates" icon={LayoutTemplate} label="Templates" />
+              <ToolsMenu />
               
               <div role="separator" className="pt-4 pb-2 px-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Account</div>
               <NavItem to="/settings" icon={Settings} label="Settings" />
@@ -129,7 +171,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
              <ThreeLoadingScreen />
            ) : (
              <React.Suspense fallback={<ThreeLoadingScreen />}>
-              <div className={isHome ? 'h-full overflow-y-auto' : ''}>
+              <div className={isHome ? 'h-full overflow-y-auto' : isWorkspace ? 'h-full overflow-hidden relative' : ''}>
                 {children}
               </div>
              </React.Suspense>

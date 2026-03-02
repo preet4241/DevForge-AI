@@ -5,7 +5,7 @@ import { Type, GoogleGenAI, GenerateContentResponse } from '@google/genai';
 
 export interface KnowledgeItem {
   content: string;
-  type: 'rule' | 'pattern' | 'anti-pattern';
+  type: 'rule' | 'pattern' | 'anti-pattern' | 'critique' | 'scenario' | 'debate_outcome';
   domain: 'security' | 'performance' | 'ui' | 'backend' | 'devops' | 'general';
 }
 
@@ -33,17 +33,20 @@ export class LearningService {
   static async extractKnowledge(content: string, imageData?: string): Promise<KnowledgeExtraction | null> {
     const systemInstruction = `
       ROLE: NEURAL DISTILLER.
-      GOAL: Extract HARD CONSTRAINTS, LIMITATIONS, and SECURITY RULES from the discussion.
+      GOAL: Extract HARD CONSTRAINTS, LIMITATIONS, SECURITY RULES, SCENARIOS, and CRITIQUES from the discussion.
       
       CONTEXT: The team is discussing a scenario to understand what is NOT possible or what requires strict boundaries.
       
       INSTRUCTIONS:
-      1. Analyze the content for "Cannot be done", "Must not", "Risk", or "limitation".
+      1. Analyze the content for rules, risks, scenarios, or critiques.
       2. Categorize into DOMAIN: 'security', 'performance', 'ui', 'backend', 'devops', or 'general'.
       3. Classify type: 
          - 'rule' (Hard constraint/Security limit)
          - 'anti-pattern' (Bad practice/Assumption to avoid)
          - 'pattern' (Correct approach to a complex problem)
+         - 'critique' (A specific flaw found in the user's approach)
+         - 'scenario' (A hypothetical failure situation discussed)
+         - 'debate_outcome' (The final agreed-upon resolution from agents)
       
       OUTPUT: Strictly JSON object matching the schema.
     `;
@@ -56,8 +59,8 @@ export class LearningService {
           items: {
             type: Type.OBJECT,
             properties: {
-              content: { type: Type.STRING, description: "The concise rule/constraint text." },
-              type: { type: Type.STRING, enum: ['rule', 'pattern', 'anti-pattern'] },
+              content: { type: Type.STRING, description: "The concise rule/constraint/scenario text." },
+              type: { type: Type.STRING, enum: ['rule', 'pattern', 'anti-pattern', 'critique', 'scenario', 'debate_outcome'] },
               domain: { type: Type.STRING, enum: ['security', 'performance', 'ui', 'backend', 'devops', 'general'] }
             },
             required: ['content', 'type', 'domain']
@@ -85,7 +88,7 @@ export class LearningService {
       const ai = new GoogleGenAI({ apiKey });
       // Using Flash for extraction to save budget/time
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-latest',
+        model: 'gemini-3-flash-preview',
         contents: { parts: promptParts },
         config: {
           systemInstruction,
@@ -177,7 +180,8 @@ export class LearningService {
 
   /**
    * Simulates a multi-agent group discussion using TRUE A2A (Agent-to-Agent) communication.
-   * Agents speak sequentially, reading the previous context, with delays to prevent 429 errors.
+   * Uses a dynamic moderator loop to select from all 25 agents based on relevance.
+   * Agents speak sequentially with delays to prevent 429 errors.
    */
   static async startTeamDiscussion(
     content: string, 
@@ -186,14 +190,8 @@ export class LearningService {
     fileName?: string,
     useRawMode: boolean = false
   ) {
-    const agents = [
-      { name: 'Aarav', role: 'Product Manager', focus: 'Analyze the core function, user intent, and overall goal. What is the user trying to achieve?' },
-      { name: 'Rohit', role: 'Architect', focus: 'Analyze the architecture, data flow, and APIs based on the input and previous analysis.' },
-      { name: 'Cipher', role: 'Security Expert', focus: 'Analyze security risks, vulnerabilities, rate limits, and how target systems might detect this.' },
-      { name: 'Vikram', role: 'Backend Engineer', focus: 'Summarize the technical implementation details, logic, and suggest concrete improvements.' }
-    ];
-
     let fullTranscript = `USER INPUT: "${content}"\nATTACHMENT: ${fileName || 'None'}\n\n--- DISCUSSION START ---\n\n`;
+    const availableAgentsList = Object.keys(AGENT_PERSONAS).join(', ');
 
     try {
       const apiKey = process.env.API_KEY;
@@ -203,28 +201,84 @@ export class LearningService {
 
       const ai = new GoogleGenAI({ apiKey });
 
-      for (let i = 0; i < agents.length; i++) {
-        const agent = agents[i];
+      let discussionActive = true;
+      let turnCount = 0;
+      const MAX_TURNS = 6; // Prevent infinite loops
+      let lastSpeaker = '';
+
+      while (discussionActive && turnCount < MAX_TURNS) {
+        // 1. Moderator (Aarav/System) decides who speaks next based on context
+        const moderatorPrompt = `
+        You are the System Moderator.
+        You are moderating a discussion about a user's code/idea among 25 expert agents.
         
-        const prompt = `
-        CONTEXT: EDUCATIONAL CODE ANALYSIS & SECURITY RESEARCH.
-        OBJECTIVE: Analyze the User's input (Code/Idea) to understand its INTERNAL MECHANICS, LOGIC FLOW, and ARCHITECTURE.
+        CURRENT TRANSCRIPT:
+        ${fullTranscript}
         
-        You are ${agent.name}, the ${agent.role}.
-        Your specific focus for this turn: ${agent.focus}
+        AVAILABLE AGENTS: ${availableAgentsList}
+        
+        TASK: Decide who should speak next. 
+        - Choose an agent who has the MOST relevant expertise for the current state of the discussion.
+        - DO NOT choose the same agent who just spoke (${lastSpeaker}).
+        - If the discussion has reached a natural conclusion, or if no other agent has anything valuable to add, return "DONE".
+        - Only call upon agents if their specific expertise is absolutely needed.
+        `;
+
+        const schema = {
+          type: Type.OBJECT,
+          properties: {
+            nextAgent: { type: Type.STRING, description: "Name of the agent to speak next, or 'DONE' if finished." },
+            reason: { type: Type.STRING, description: "Brief reason why this agent is needed." }
+          },
+          required: ['nextAgent', 'reason']
+        };
+
+        // Use a fast model for moderation
+        const modResponse = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: moderatorPrompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: schema
+          }
+        });
+
+        const moderatorDecision = JSON.parse(modResponse.text || "{}");
+        
+        if (!moderatorDecision || moderatorDecision.nextAgent === 'DONE' || !AGENT_PERSONAS[moderatorDecision.nextAgent]) {
+          discussionActive = false;
+          break;
+        }
+
+        const nextAgentName = moderatorDecision.nextAgent;
+        lastSpeaker = nextAgentName;
+        turnCount++;
+
+        // Delay to prevent 429 Rate Limit errors (3 seconds)
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // 2. The selected agent speaks
+        const agentPersona = AGENT_PERSONAS[nextAgentName];
+        const agentPrompt = `
+        CONTEXT: EDUCATIONAL CODE ANALYSIS, CRITIQUE & SECURITY RESEARCH.
+        OBJECTIVE: Train the user by analyzing their input/code. DO NOT GENERATE NEW CODE unless explicitly asked for a tiny snippet to explain a concept.
+        
+        ${agentPersona}
         
         Here is the discussion so far:
         ${fullTranscript}
         
         INSTRUCTIONS:
         1. Read the user input and the previous agents' thoughts.
-        2. Provide your expert analysis based on your specific focus.
-        3. Speak directly to the team or the user. Keep it concise, technical, and insightful (1-2 short paragraphs).
-        4. DO NOT output your name at the beginning (e.g., don't write "${agent.name}:"). Just write your response.
+        2. ANALYZE & CRITIQUE: Focus on "Why" this approach was taken, potential pitfalls, security risks, and performance bottlenecks.
+        3. ASK QUESTIONS: Challenge the user or other agents. E.g., "Why use this library?", "How does this handle edge case X?".
+        4. SCENARIO SIMULATION: If applicable, propose a failure scenario (e.g., "What if the DB locks here?") to test the logic.
+        5. Speak directly to the team or the user. Keep it concise, technical, and insightful (1-2 short paragraphs).
+        6. DO NOT output your name at the beginning.
         `;
 
-        let parts: any[] = [{ text: prompt }];
-        if (imageData && i === 0) { // Only send image to the first agent to save bandwidth/tokens, or send to all? Let's send to all for context.
+        let parts: any[] = [{ text: agentPrompt }];
+        if (imageData && turnCount === 1) { // Send image to the first agent
            parts.push({
             inlineData: {
               mimeType: "image/jpeg",
@@ -234,12 +288,12 @@ export class LearningService {
         }
 
         const streamResponse = await ai.models.generateContentStream({
-          model: 'gemini-2.5-flash-latest', 
+          model: 'gemini-3-flash-preview', 
           contents: { parts }
         });
 
         if (!streamResponse) {
-          throw new Error(`No response from AI model for ${agent.name}.`);
+          throw new Error(`No response from AI model for ${nextAgentName}.`);
         }
 
         let agentResponse = "";
@@ -250,21 +304,18 @@ export class LearningService {
           if (!chunkText) continue;
           
           agentResponse += chunkText;
-          onAgentSpeak(agent.name, chunkText, isFirstChunk);
+          onAgentSpeak(nextAgentName, chunkText, isFirstChunk);
           isFirstChunk = false;
         }
 
-        fullTranscript += `[${agent.name}]: ${agentResponse}\n\n`;
+        fullTranscript += `[${nextAgentName}]: ${agentResponse}\n\n`;
 
-        // Delay to prevent 429 Rate Limit errors (3 seconds)
-        if (i < agents.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        }
+        // Delay after speaking to prevent 429 on the next moderator call
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
 
       // Extract Knowledge (Background process)
       if (fullTranscript.length > 100) {
-         // Add a small delay before the final extraction call to be safe
          setTimeout(() => {
              this.extractKnowledge(fullTranscript, imageData);
          }, 4000);

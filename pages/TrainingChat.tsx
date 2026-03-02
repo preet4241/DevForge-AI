@@ -50,7 +50,7 @@ const TrainingChat = () => {
     {
       id: 'init',
       role: 'model',
-      text: "Neural Training Module Online. \n\nThis channel is for **Scenario Analysis** and **Constraint Learning**. \n\nSubmit edge cases, complex requirements, or security scenarios. The agents will **Huddle** and debate limitations and feasibility. \n\n*No casual conversation.*",
+      text: "Neural Training Module Online. \n\nThis channel is for **Scenario Analysis** and **Constraint Learning**. \n\nSubmit edge cases, complex requirements, or security scenarios. The agents will **Analyze** and debate limitations and feasibility. \n\n*No casual conversation.*",
       agentName: 'System'
     }
   ]);
@@ -64,13 +64,14 @@ const TrainingChat = () => {
   // Knowledge Modal State
   const [showKnowledgeModal, setShowKnowledgeModal] = useState(false);
   const [knowledgeSearch, setKnowledgeSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'rules' | 'patterns' | 'risks' | 'logs'>('rules');
+  const [activeTab, setActiveTab] = useState<'rules' | 'patterns' | 'risks' | 'scenarios' | 'logs'>('rules');
   const [knowledgeItems, setKnowledgeItems] = useState<{ 
     rules: MemoryItem[], 
     patterns: MemoryItem[], 
     antiPatterns: MemoryItem[],
+    scenarios: MemoryItem[],
     logs: LearningLog[] 
-  }>({ rules: [], patterns: [], antiPatterns: [], logs: [] });
+  }>({ rules: [], patterns: [], antiPatterns: [], scenarios: [], logs: [] });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -311,6 +312,10 @@ const TrainingChat = () => {
         items = getFilteredItems(knowledgeItems.antiPatterns);
         EmptyState = () => <div className="text-zinc-500 italic p-4">No risks identified.</div>;
         break;
+      case 'scenarios':
+        items = getFilteredItems(knowledgeItems.scenarios || []);
+        EmptyState = () => <div className="text-zinc-500 italic p-4">No scenarios simulated yet.</div>;
+        break;
       case 'logs':
         // Logs handled separately below
         break;
@@ -420,6 +425,12 @@ const TrainingChat = () => {
                   >
                     <AlertTriangle size={18} /> Risks
                   </button>
+                  <button 
+                    onClick={() => setActiveTab('scenarios')}
+                    className={`whitespace-nowrap md:whitespace-normal text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 transition-all ${activeTab === 'scenarios' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20 shadow-sm' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}`}
+                  >
+                    <BrainCircuit size={18} /> Scenarios
+                  </button>
                   
                   <div className="hidden md:block h-px bg-zinc-800 my-2"></div>
                   
@@ -432,7 +443,7 @@ const TrainingChat = () => {
                </div>
 
                {/* Content Area */}
-               <div className="flex-1 flex flex-col bg-zinc-950 min-w-0">
+               <div className="flex-1 flex flex-col bg-zinc-950 min-w-0 overflow-hidden">
                   {/* Search Bar (Only for data tabs) */}
                   {activeTab !== 'logs' && (
                     <div className="p-4 border-b border-zinc-800 bg-zinc-900/30">
@@ -522,45 +533,6 @@ const TrainingChat = () => {
           </div>
         </div>
 
-        {/* HUDDLE VISUALIZER */}
-        {isProcessing && (
-           <div className="mx-auto max-w-2xl bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 animate-fade-in mb-6 sticky top-0 z-10 backdrop-blur-md">
-              <div className="flex items-center justify-between mb-3 border-b border-zinc-800/50 pb-2">
-                 <div className="flex items-center gap-2 text-xs font-bold text-orange-400 uppercase tracking-wider">
-                    <Users size={14} /> Neural Huddle Active
-                 </div>
-                 <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse"></span>
-                    <span className="text-[10px] text-zinc-500">Processing Stream...</span>
-                 </div>
-              </div>
-              <div className="flex justify-between items-center px-2">
-                 {AGENTS_LIST.map((agent) => (
-                    <div key={agent.name} className="flex flex-col items-center gap-1.5 transition-all duration-300">
-                       <div 
-                         className={`
-                           w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold border-2 transition-all duration-300
-                           ${activeSpeaker === agent.name 
-                             ? `${agent.color} text-white border-white scale-110 shadow-[0_0_15px_rgba(255,255,255,0.3)]` 
-                             : 'bg-zinc-800 border-zinc-700 text-zinc-500 opacity-50 grayscale'}
-                         `}
-                       >
-                         {agent.name[0]}
-                       </div>
-                       <span className={`text-[9px] font-medium transition-colors ${activeSpeaker === agent.name ? 'text-white' : 'text-zinc-600'}`}>
-                         {agent.name}
-                       </span>
-                    </div>
-                 ))}
-              </div>
-              <div className="mt-4 text-center">
-                 <p className="text-xs text-zinc-400 animate-pulse italic">
-                    {activeSpeaker ? `${activeSpeaker} is speaking...` : 'Analyzing constraints...'}
-                 </p>
-              </div>
-           </div>
-        )}
-
         {messages.map((msg) => (
           <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in`}>
             
@@ -645,7 +617,7 @@ const TrainingChat = () => {
           <textarea
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder={rawMode ? "Enter unrestricted scenario for Cipher..." : "Describe a scenario. Agents will Huddle & Debate constraints..."}
+            placeholder={rawMode ? "Enter unrestricted scenario for Cipher..." : "Describe a scenario. Agents will Analyze & Debate constraints..."}
             className="w-full bg-transparent border-none text-zinc-200 placeholder-zinc-600 px-4 py-3 focus:ring-0 resize-none h-20 text-sm"
           />
 
@@ -681,7 +653,7 @@ const TrainingChat = () => {
               disabled={(!inputValue.trim() && attachedFiles.length === 0) || isProcessing}
               className={`rounded-xl px-6 py-2 h-10 shadow-lg ${rawMode ? 'bg-red-900 hover:bg-red-800 shadow-red-900/20' : 'shadow-orange-900/20'}`}
             >
-               Huddle <BrainCircuit size={16} />
+               Analyze <BrainCircuit size={16} />
             </Button>
           </div>
         </div>

@@ -2,7 +2,7 @@
 import { IdbStorage } from './idbStorage';
 import { getEmbedding } from './geminiService';
 
-export type MemoryType = 'rule' | 'pattern' | 'anti-pattern';
+export type MemoryType = 'rule' | 'pattern' | 'anti-pattern' | 'critique' | 'scenario' | 'debate_outcome';
 
 export interface MemoryItem {
   id: string;
@@ -13,6 +13,9 @@ export interface MemoryItem {
   useCount: number;
   source?: string;
   embedding?: number[]; // Vector embedding for RAG
+  // New fields for advanced training data
+  scenarioContext?: string; // For 'scenario' type: The situation description
+  critiqueTarget?: string; // For 'critique' type: What was critiqued (e.g., "auth_flow")
 }
 
 export interface LearningLog {
@@ -380,9 +383,9 @@ export class MemoryController {
 
 export class GlobalMemoryController {
   // Keeping global memory simple for now (no RAG) as it's small, but could be upgraded too
-  private static getGlobalStore(): Omit<AgentMemoryStore, 'agentId' | 'stats'> {
+  private static getGlobalStore(): Omit<AgentMemoryStore, 'agentId' | 'stats'> & { scenarios: MemoryItem[], critiques: MemoryItem[] } {
     const stored = localStorage.getItem('devforge_global_memory_v1');
-    return stored ? JSON.parse(stored) : { isEnabled: true, rules: [], patterns: [], antiPatterns: [], logs: [] };
+    return stored ? JSON.parse(stored) : { isEnabled: true, rules: [], patterns: [], antiPatterns: [], scenarios: [], critiques: [], logs: [] };
   }
 
   private static saveGlobalStore(store: any) {
@@ -401,11 +404,26 @@ export class GlobalMemoryController {
       source: 'training_chat'
     };
 
-    let targetArray = type === 'rule' ? store.rules : type === 'pattern' ? store.patterns : store.antiPatterns;
+    let targetArray;
+    if (type === 'rule') targetArray = store.rules;
+    else if (type === 'pattern') targetArray = store.patterns;
+    else if (type === 'scenario') targetArray = store.scenarios;
+    else if (type === 'critique') targetArray = store.critiques;
+    else targetArray = store.antiPatterns;
+
+    if (!targetArray) targetArray = []; // Fallback if missing in old store
+
     if (targetArray.some(item => item.content === newItem.content)) return;
 
     targetArray.unshift(newItem);
     if (targetArray.length > 50) targetArray.pop();
+
+    // Re-assign back to store to ensure it's saved if it was missing
+    if (type === 'rule') store.rules = targetArray;
+    else if (type === 'pattern') store.patterns = targetArray;
+    else if (type === 'scenario') store.scenarios = targetArray;
+    else if (type === 'critique') store.critiques = targetArray;
+    else store.antiPatterns = targetArray;
 
     this.saveGlobalStore(store);
   }

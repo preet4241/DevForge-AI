@@ -35,6 +35,7 @@ const Settings = lazy(() => retry(() => import('./pages/Settings')));
 const TrainingChat = lazy(() => retry(() => import('./pages/TrainingChat')));
 const Templates = lazy(() => retry(() => import('./pages/Templates')));
 const LogicBuilder = lazy(() => retry(() => import('./pages/LogicBuilder')));
+const TerminalPage = lazy(() => retry(() => import('./pages/TerminalPage')));
 
 function App() {
   return (
@@ -54,6 +55,7 @@ function App() {
               <Route path="/agents" element={<AgentDashboard />} />
               <Route path="/training" element={<TrainingChat />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/terminal" element={<TerminalPage />} />
             </Routes>
           </Layout>
         </HashRouter>

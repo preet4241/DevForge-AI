@@ -232,6 +232,18 @@ const Projects = () => {
       status: 'active'
     };
     
+    // Create folder in workspace via API
+    try {
+      const folderName = newProjectData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      await fetch('/api/workspace/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderName })
+      });
+    } catch (e) {
+      console.error("Failed to create workspace folder", e);
+    }
+
     setProjects([newProject, ...projects]);
     await StorageService.saveProject(newProject);
     localStorage.setItem('currentProject', JSON.stringify(newProject));

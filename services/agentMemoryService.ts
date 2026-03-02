@@ -8,6 +8,10 @@ export interface AgentMemoryEntry {
   connections: string[];
   confidence: 'high' | 'medium' | 'low';
   timestamp: number;
+  // New fields for advanced training
+  type?: 'rule' | 'pattern' | 'critique' | 'scenario' | 'debate_outcome';
+  domain?: string; // e.g., 'security', 'performance'
+  scenarioContext?: string;
 }
 
 export class AgentMemoryService {
@@ -22,7 +26,7 @@ export class AgentMemoryService {
         return;
       }
 
-      const memoryRef = ref(rtdb, `agents_memory/${agentId}`);
+      const memoryRef = ref(rtdb, `agents/${agentId}/memories`);
       const newMemoryRef = push(memoryRef);
       
       const fullEntry: AgentMemoryEntry = {
@@ -48,7 +52,7 @@ export class AgentMemoryService {
         return this.getLocalMemories(agentId);
       }
 
-      const memoryRef = ref(rtdb, `agents_memory/${agentId}`);
+      const memoryRef = ref(rtdb, `agents/${agentId}/memories`);
       const q = query(memoryRef, orderByChild('timestamp'), limitToLast(limit));
       const snapshot = await get(q);
 

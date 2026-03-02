@@ -21,6 +21,10 @@ export class Orchestrator {
     // --- STEP 1: AARAV - The Router/Classifier ---
     onStatusUpdate('Aarav', 'Classifying message and routing...');
     
+    // Get all 25 agent names dynamically
+    const allAgentNames = Object.keys(require('./geminiService').AGENT_PERSONAS);
+    const agentNamesString = allAgentNames.join(', ');
+
     const aaravSchema = {
       type: Type.OBJECT,
       properties: {
@@ -32,7 +36,7 @@ export class Orchestrator {
         relevantAgents: {
           type: Type.ARRAY,
           items: { type: Type.STRING },
-          description: "List of relevant agent names (e.g., 'Sanya', 'Arjun', 'Rohit', 'Vikram', 'Neha', 'Kunal', 'Pooja', 'Cipher', 'Maya'). Empty for casual."
+          description: `List of relevant agent names from the available pool. Empty for casual.`
         },
         priorityLevel: {
           type: Type.STRING,
@@ -54,10 +58,10 @@ export class Orchestrator {
       Analyze the following user message and classify it.
       User Message: "${userMessage}"
       
-      Available Agents: Sanya (Research), Arjun (PM), Rohit (Architect), Vikram (Backend), Neha (Frontend), Kunal (DevOps), Pooja (QA), Cipher (Security), Maya (UI/UX).
+      Available Agents: ${agentNamesString}.
       
       Decide if it's learning (facts/code), casual (greetings), task (build/calculate), or debate (complex topic).
-      Select ONLY the relevant agents. If casual, relevantAgents can be empty.
+      Select ONLY the agents whose specific expertise is absolutely required to handle this request. If casual, relevantAgents can be empty.
     `;
 
     const classification = await generateJSON(aaravPrompt, getAgentPersona('Aarav'), aaravSchema, { signal });
@@ -66,12 +70,15 @@ export class Orchestrator {
       return "Aarav failed to classify the message. Please try again.";
     }
 
-    const { messageType, relevantAgents, shouldSaveMemory, topic } = classification;
-    let finalResponse = `**Aarav (Router):** Classified as \`${messageType}\`. Relevant Agents: ${relevantAgents.length ? relevantAgents.join(', ') : 'None'}.\n\n`;
+    // Ensure only valid agents are selected
+    const validRelevantAgents = (classification.relevantAgents || []).filter((a: string) => allAgentNames.includes(a));
+    const { messageType, shouldSaveMemory, topic } = classification;
+    
+    let finalResponse = `**Aarav (Router):** Classified as \`${messageType}\`. Relevant Agents: ${validRelevantAgents.length ? validRelevantAgents.join(', ') : 'None'}.\n\n`;
     onMessageChunk('Aarav', finalResponse);
 
     // --- STEP 2: Sequential Processing & Debate ---
-    if (relevantAgents.length === 0) {
+    if (validRelevantAgents.length === 0) {
       // Casual or unassigned
       onStatusUpdate('Aarav', 'Responding directly...');
       const casualResp = await chatWithAgent(history, userMessage, getAgentPersona('Aarav'), 'Aarav', { signal });
@@ -82,7 +89,8 @@ export class Orchestrator {
     let accumulatedContext = `User Request: ${userMessage}\n\n`;
     let agentResponses: { agent: string, response: string }[] = [];
 
-    for (const agentName of relevantAgents) {
+    for (let i = 0; i < validRelevantAgents.length; i++) {
+      const agentName = validRelevantAgents[i];
       if (signal?.aborted) throw new Error("Process stopped by user.");
       
       onStatusUpdate(agentName, 'Processing and thinking...');
@@ -97,7 +105,7 @@ export class Orchestrator {
         ${accumulatedContext}
         ${memoryContext}
         
-        Task: Provide your expert response or code based on your role. If previous agents have responded, you can agree, disagree, or build upon their work.
+        Task: Provide your expert response or code based on your role. If previous agents have responded, you MUST read their responses and build upon them, agree, or disagree based on your expertise. Do not just repeat what they said.
         State your confidence level (High/Medium/Low) at the end of your response.
       `;
 
@@ -107,10 +115,18 @@ export class Orchestrator {
       agentResponses.push({ agent: agentName, response });
       accumulatedContext += `[${agentName}'s Response]:\n${response}\n\n`;
       finalResponse += `**${agentName}:**\n${response}\n\n`;
+
+      // Smart Delay to prevent 429 errors when multiple agents are talking
+      if (i < validRelevantAgents.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
     }
 
     // --- STEP 3: Synthesis (If Debate/Multiple Agents) ---
-    if (relevantAgents.length > 1) {
+    if (validRelevantAgents.length > 1) {
+      // Delay before synthesis to prevent 429
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
       onStatusUpdate('Aarav', 'Synthesizing final response...');
       const synthesisPrompt = `
         The user asked: "${userMessage}"
@@ -128,12 +144,9 @@ export class Orchestrator {
     if (shouldSaveMemory || messageType === 'learning') {
       onStatusUpdate('System', 'Saving to Agent Memory...');
       
-      for (const agentName of relevantAgents) {
-        // Find the agent's specific response to summarize, or summarize the whole context
+      for (const agentName of validRelevantAgents) {
         const agentResp = agentResponses.find(r => r.agent === agentName)?.response || userMessage;
         
-        // In a real scenario, a dedicated Memory Manager Agent would summarize this.
-        // For now, we save a structured entry directly.
         await AgentMemoryService.saveMemory(agentName, {
           topic: topic || 'General Learning',
           summary: `Learned from user input: ${userMessage.substring(0, 100)}... Agent concluded: ${agentResp.substring(0, 100)}...`,
@@ -141,7 +154,7 @@ export class Orchestrator {
           confidence: 'high'
         });
       }
-      finalResponse += `*(System: Learning data saved to memory for ${relevantAgents.join(', ')})*\n`;
+      finalResponse += `*(System: Learning data saved to memory for ${validRelevantAgents.join(', ')})*\n`;
     }
 
     onStatusUpdate('System', 'Cycle Complete');
