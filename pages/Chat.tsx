@@ -4,7 +4,7 @@ import {
   Bot, ChevronLeft, Wrench, MessageSquare, Monitor, Terminal, Paperclip, X, FileCode, 
   ArrowUp, Activity, MoreVertical, Rocket, Zap, Globe, Download, Code, Maximize2, Minimize2, Copy, Check,
   Ghost, MessageCircleWarning, Trash2, BookOpen, Sparkles, Book, BrainCircuit, Save,
-  Play, Square
+  Play, Square, MessageCircle, ClipboardList, Smartphone, Tablet
 } from 'lucide-react';
 import { Button, Badge, Tooltip } from '../components/UI';
 import { Orchestrator } from '../services/orchestrator';
@@ -75,11 +75,20 @@ const Chat = () => {
   const [showWhispers, setShowWhispers] = useState(false);
   const [isShadowThinking, setIsShadowThinking] = useState(false);
 
+  // Tasks
+  const [showTasks, setShowTasks] = useState(false);
+
   // Console & Runtime
   const [showConsole, setShowConsole] = useState(false);
   const [logs, setLogs] = useState<{id: number, time: string, text: string}[]>([]);
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const [isAppRunning, setIsAppRunning] = useState(false);
+  
+  const [showWhisperModal, setShowWhisperModal] = useState(false);
+  const [showTasksModal, setShowTasksModal] = useState(false);
+  
+  const [viewMode, setViewMode] = useState<'chat' | 'preview'>('chat');
+  const [previewDevice, setPreviewDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   
   const [showActivityLog, setShowActivityLog] = useState(false);
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
@@ -276,6 +285,22 @@ const Chat = () => {
         </div>
 
         <div className="flex items-center gap-1.5 md:gap-3">
+           <Tooltip content="Whispers">
+             <button 
+               onClick={() => setShowWhispers(!showWhispers)}
+               className={`p-2 rounded-lg transition-colors ${showWhispers ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/20' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
+             >
+               <MessageCircle size={20} />
+             </button>
+           </Tooltip>
+           <Tooltip content="Tasks">
+             <button 
+               onClick={() => setShowTasks(!showTasks)}
+               className={`p-2 rounded-lg transition-colors ${showTasks ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/20' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
+             >
+               <ClipboardList size={20} />
+             </button>
+           </Tooltip>
            <Tooltip content="Manage Artifacts">
              <button 
                onClick={() => setShowArtifacts(!showArtifacts)}
@@ -299,45 +324,116 @@ const Chat = () => {
       <div className="flex-1 flex overflow-hidden relative">
         {/* CHAT AREA */}
         <div className="flex-1 flex flex-col min-w-0 bg-zinc-950 relative">
-          <div className="flex-1 overflow-y-auto custom-scrollbar px-3 md:px-6 py-4 md:py-8 space-y-6 md:space-y-8">
-            {messages.map((msg, i) => (
-              <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in`}>
-                {msg.role === 'model' && (
-                  <div className="flex items-center gap-2 mb-2 px-1">
-                    <div className="w-6 h-6 rounded-full bg-orange-600 flex items-center justify-center text-[10px] font-black text-white border border-orange-400/30">
-                       {msg.agentName?.[0] || 'A'}
+          {viewMode === 'chat' ? (
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-3 md:px-6 py-4 md:py-8 space-y-6 md:space-y-8">
+              {messages.map((msg, i) => (
+                <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in`}>
+                  {msg.role === 'model' && (
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                      <div className="w-6 h-6 rounded-full bg-orange-600 flex items-center justify-center text-[10px] font-black text-white border border-orange-400/30">
+                         {msg.agentName?.[0] || 'A'}
+                      </div>
+                      <span className="text-xs font-bold text-orange-500 uppercase tracking-widest">{msg.agentName || 'AI Agent'}</span>
                     </div>
-                    <span className="text-xs font-bold text-orange-500 uppercase tracking-widest">{msg.agentName || 'AI Agent'}</span>
+                  )}
+                  <div className={`
+                    max-w-[92%] sm:max-w-[85%] rounded-2xl p-4 md:p-5 shadow-sm
+                    ${msg.role === 'user' 
+                      ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm border border-zinc-700' 
+                      : 'bg-zinc-900/50 border border-zinc-800 text-zinc-300 rounded-tl-sm'}
+                  `}>
+                    <Markdown text={msg.text} />
                   </div>
-                )}
-                <div className={`
-                  max-w-[92%] sm:max-w-[85%] rounded-2xl p-4 md:p-5 shadow-sm
-                  ${msg.role === 'user' 
-                    ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm border border-zinc-700' 
-                    : 'bg-zinc-900/50 border border-zinc-800 text-zinc-300 rounded-tl-sm'}
-                `}>
-                  <Markdown text={msg.text} />
+                </div>
+              ))}
+              
+              {/* AGENT STATUS INDICATOR */}
+              {isLoading && currentStatus && (
+                <div className="flex flex-col items-start animate-fade-in">
+                   <div className="flex items-center gap-2 mb-2 px-1">
+                      <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700">
+                         <Activity size={10} className="text-orange-500 animate-pulse" />
+                      </div>
+                      <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{currentStatus.agent}</span>
+                   </div>
+                   <div className="bg-zinc-900/30 border border-dashed border-zinc-800 rounded-2xl px-5 py-4 flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full bg-orange-500 animate-ping"></div>
+                      <span className="text-sm italic text-zinc-500">{currentStatus.status}</span>
+                   </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} className="h-10 shrink-0" />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-hidden flex flex-col bg-zinc-900/30 animate-fade-in">
+              {/* Preview Header with Device Toggles */}
+              <div className="h-12 border-b border-zinc-800/50 flex items-center justify-center gap-2 shrink-0 bg-zinc-950/50">
+                <Tooltip content="Desktop View">
+                  <button 
+                    onClick={() => setPreviewDevice('desktop')}
+                    className={`p-2 rounded-lg transition-all ${previewDevice === 'desktop' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    <Monitor size={18} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Tablet View">
+                  <button 
+                    onClick={() => setPreviewDevice('tablet')}
+                    className={`p-2 rounded-lg transition-all ${previewDevice === 'tablet' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    <Tablet size={18} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Mobile View">
+                  <button 
+                    onClick={() => setPreviewDevice('mobile')}
+                    className={`p-2 rounded-lg transition-all ${previewDevice === 'mobile' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    <Smartphone size={18} />
+                  </button>
+                </Tooltip>
+              </div>
+              {/* Preview Content */}
+              <div className="flex-1 overflow-hidden flex items-center justify-center p-4 md:p-8 bg-zinc-950/30">
+                <div 
+                  className={`bg-white shadow-2xl overflow-hidden transition-all duration-500 flex flex-col border border-zinc-800/50 relative mx-auto ${
+                    previewDevice === 'desktop' ? 'w-full h-full rounded-xl max-w-6xl' : 
+                    previewDevice === 'tablet' ? 'w-full h-full max-w-[768px] max-h-[1024px] rounded-[2rem]' : 
+                    'w-full h-full max-w-[375px] max-h-[812px] rounded-[2.5rem]'
+                  }`}
+                >
+                  {/* Device Notch/Header for Mobile/Tablet */}
+                  {previewDevice !== 'desktop' && (
+                    <div className="h-6 w-full bg-zinc-100 flex items-center justify-center shrink-0 border-b border-zinc-200">
+                      <div className="w-16 h-1.5 bg-zinc-300 rounded-full"></div>
+                    </div>
+                  )}
+
+                  <div className="flex-1 w-full h-full flex flex-col items-center justify-center bg-zinc-50 relative overflow-hidden">
+                    {isAppRunning ? (
+                      <div className="w-full h-full flex flex-col items-center justify-center animate-fade-in p-6 text-center">
+                        <Globe size={48} className="text-zinc-300 mb-4 animate-pulse" />
+                        <p className="text-zinc-500 font-medium">App is running</p>
+                        <p className="text-zinc-400 text-sm mt-2">GUI Preview rendered here</p>
+                        <div className="mt-8 p-4 bg-white rounded-xl border border-zinc-200 shadow-sm w-full max-w-sm">
+                          <p className="text-xs text-zinc-500 font-mono">Current View: {previewDevice}</p>
+                          <div className="mt-2 h-2 w-full bg-zinc-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-orange-500 w-full animate-pulse"></div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center animate-fade-in p-6 text-center">
+                        <Play size={48} className="text-zinc-300 mb-4 opacity-50" />
+                        <p className="text-zinc-500 font-medium">App is stopped</p>
+                        <p className="text-zinc-400 text-sm mt-2">Click Run Execution to start</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            ))}
-            
-            {/* AGENT STATUS INDICATOR */}
-            {isLoading && currentStatus && (
-              <div className="flex flex-col items-start animate-fade-in">
-                 <div className="flex items-center gap-2 mb-2 px-1">
-                    <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700">
-                       <Activity size={10} className="text-orange-500 animate-pulse" />
-                    </div>
-                    <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{currentStatus.agent}</span>
-                 </div>
-                 <div className="bg-zinc-900/30 border border-dashed border-zinc-800 rounded-2xl px-5 py-4 flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-orange-500 animate-ping"></div>
-                    <span className="text-sm italic text-zinc-500">{currentStatus.status}</span>
-                 </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} className="h-10 shrink-0" />
-          </div>
+            </div>
+          )}
 
           {/* BOTTOM CONSOLE PANEL (Drawer) */}
           {showConsole && (
@@ -391,7 +487,8 @@ const Chat = () => {
                   placeholder="Ask the swarm to modify, build or explain..."
                   className="w-full bg-transparent border-none text-zinc-200 placeholder-zinc-600 px-4 py-3 focus:ring-0 resize-none h-14 md:h-20 text-sm"
                 />
-                <div className="flex items-center justify-between px-3 py-2 bg-zinc-950/50 border-t border-zinc-800/50">
+                <div className="flex items-center justify-between px-3 py-2 bg-zinc-950/50 border-t border-zinc-800/50 relative">
+                  {/* Left side: Attach & Console */}
                   <div className="flex items-center gap-1 md:gap-2">
                     <Tooltip content="Attach Context">
                       <button 
@@ -413,7 +510,32 @@ const Chat = () => {
                         <Terminal size={20} />
                       </button>
                     </Tooltip>
+                  </div>
 
+                  {/* Center: Toggle Button */}
+                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center bg-zinc-900/80 rounded-lg p-1 border border-zinc-800/50 backdrop-blur-sm">
+                    <button
+                      onClick={() => setViewMode('chat')}
+                      className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all duration-300 relative ${viewMode === 'chat' ? 'text-orange-500' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      {viewMode === 'chat' && (
+                        <span className="absolute inset-0 bg-zinc-800 rounded-md shadow-sm -z-10 animate-fade-in"></span>
+                      )}
+                      Chat
+                    </button>
+                    <button
+                      onClick={() => setViewMode('preview')}
+                      className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all duration-300 relative ${viewMode === 'preview' ? 'text-orange-500' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      {viewMode === 'preview' && (
+                        <span className="absolute inset-0 bg-zinc-800 rounded-md shadow-sm -z-10 animate-fade-in"></span>
+                      )}
+                      Preview
+                    </button>
+                  </div>
+
+                  {/* Right side: Run & Dispatch */}
+                  <div className="flex items-center gap-2">
                     <Tooltip content={isAppRunning ? "Stop Execution" : "Run Execution"}>
                       <button 
                         onClick={() => setIsAppRunning(!isAppRunning)}
@@ -422,16 +544,16 @@ const Chat = () => {
                         {isAppRunning ? <Square size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
                       </button>
                     </Tooltip>
-                  </div>
 
-                  <Button 
-                    onClick={handleSendMessage}
-                    disabled={!inputValue.trim() || isLoading}
-                    className="rounded-xl px-4 py-2 h-10 md:px-6 shadow-lg shadow-orange-900/20"
-                  >
-                    <span className="hidden sm:inline">Dispatch Swarm</span>
-                    <ArrowUp size={18} />
-                  </Button>
+                    <Button 
+                      onClick={handleSendMessage}
+                      disabled={!inputValue.trim() || isLoading}
+                      className="rounded-xl px-4 py-2 h-10 md:px-6 shadow-lg shadow-orange-900/20"
+                    >
+                      <span className="hidden sm:inline">Dispatch Swarm</span>
+                      <ArrowUp size={18} />
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center justify-center gap-4 text-[10px] text-zinc-600 font-bold uppercase tracking-widest">
@@ -515,6 +637,52 @@ const Chat = () => {
            </div>
         )}
       </div>
+
+      {/* WHISPERS FLOATING WINDOW */}
+      {showWhispers && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
+              <div className="flex items-center gap-2">
+                <MessageCircle className="text-orange-500" size={18} />
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider">Whispers</h2>
+              </div>
+              <button onClick={() => setShowWhispers(false)} className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-8 text-zinc-400 text-sm italic text-center">
+              <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mx-auto mb-4 opacity-50">
+                <MessageCircle size={24} />
+              </div>
+              No whispers from the shadows yet...
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TASKS FLOATING WINDOW */}
+      {showTasks && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="text-orange-500" size={18} />
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider">Tasks</h2>
+              </div>
+              <button onClick={() => setShowTasks(false)} className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-8 text-zinc-400 text-sm italic text-center">
+              <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mx-auto mb-4 opacity-50">
+                <ClipboardList size={24} />
+              </div>
+              No active tasks in the queue.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

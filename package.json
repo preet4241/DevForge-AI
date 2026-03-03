@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
+    "@langchain/core": "^1.1.29",
+    "@langchain/langgraph": "^1.2.0",
     "@monaco-editor/react": "^4.6.0",
     "@supabase/supabase-js": "2.39.7",
     "@types/express": "^5.0.6",
