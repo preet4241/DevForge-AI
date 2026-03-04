@@ -34,13 +34,13 @@ export const createCrewAIGraph = (members: string[]) => {
   // Add Edges
   members.forEach((member) => {
     // After an agent finishes, return to Supervisor
-    workflow.addEdge(member, "Supervisor");
+    workflow.addEdge(member, "Supervisor" as any);
   });
 
   // Supervisor decides next step
-  workflow.addConditionalEdges("Supervisor", shouldContinue);
+  workflow.addConditionalEdges("Supervisor" as any, shouldContinue);
 
-  workflow.setEntryPoint("Supervisor");
+  workflow.setEntryPoint("Supervisor" as any);
 
   return workflow.compile();
 };
@@ -68,15 +68,15 @@ export const createAutoGenGraph = (authorName: string, reviewerName: string) => 
   workflow.addNode(reviewerName, createAgentNode(reviewerName));
 
   // Author -> Reviewer
-  workflow.addEdge(authorName, reviewerName);
+  workflow.addEdge(authorName as any, reviewerName as any);
 
   // Reviewer -> Conditional (Loop back to Author or End)
-  workflow.addConditionalEdges(reviewerName, shouldLoop, {
-    [authorName]: authorName,
+  workflow.addConditionalEdges(reviewerName as any, shouldLoop, {
+    retry: authorName,
     __end__: END,
-  });
+  } as any);
 
-  workflow.setEntryPoint(authorName);
+  workflow.setEntryPoint(authorName as any);
 
   return workflow.compile();
 };
@@ -103,14 +103,14 @@ export const createAutoGPTGraph = (agentName: string) => {
   workflow.addNode("agent", createAgentNode(agentName));
   workflow.addNode("tools", toolNode);
 
-  workflow.addConditionalEdges("agent", shouldUseTool, {
+  workflow.addConditionalEdges("agent" as any, shouldUseTool, {
     tools: "tools",
     __end__: END,
-  });
+  } as any);
 
-  workflow.addEdge("tools", "agent");
+  workflow.addEdge("tools" as any, "agent" as any);
 
-  workflow.setEntryPoint("agent");
+  workflow.setEntryPoint("agent" as any);
 
   return workflow.compile();
 };

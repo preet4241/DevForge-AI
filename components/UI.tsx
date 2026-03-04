@@ -80,12 +80,12 @@ export const Button: React.FC<ButtonProps> = ({
   );
 };
 
-interface BadgeProps {
+interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   children?: React.ReactNode;
   color?: 'blue' | 'green' | 'amber' | 'purple' | 'orange';
 }
 
-export const Badge: React.FC<BadgeProps> = ({ children, color = 'orange' }) => {
+export const Badge: React.FC<BadgeProps> = ({ children, color = 'orange', className = '', ...props }) => {
   const colors = {
     blue: "bg-blue-500/10 text-blue-400 border-blue-500/20", 
     green: "bg-green-500/10 text-green-400 border-green-500/20",
@@ -94,7 +94,7 @@ export const Badge: React.FC<BadgeProps> = ({ children, color = 'orange' }) => {
     orange: "bg-orange-500/10 text-orange-400 border-orange-500/20",
   };
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${colors[color] || colors.orange}`}>
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${colors[color] || colors.orange} ${className}`} {...props}>
       {children}
     </span>
   );

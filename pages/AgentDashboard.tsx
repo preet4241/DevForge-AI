@@ -30,27 +30,27 @@ const AgentDashboard = () => {
 
   // React Flow State - Core Team Visualization
   const initialNodes = [
-    { id: 'user', type: 'input', position: { x: 400, y: 0 }, data: { label: 'User Intent' }, style: { background: '#fff', color: '#000', border: '1px solid #fff', fontWeight: 'bold', width: 160, textAlign: 'center', borderRadius: '8px' } },
+    { id: 'user', type: 'input', position: { x: 400, y: 0 }, data: { label: 'User Intent' }, style: { background: '#fff', color: '#000', border: '1px solid #fff', fontWeight: 'bold', width: 160, textAlign: 'center' as any, borderRadius: '8px' } },
     
     // Leadership & Planning
-    { id: 'aarav', position: { x: 400, y: 100 }, data: { label: 'Aarav (Lead)' }, style: { background: '#1e3a8a', color: '#93c5fd', border: '1px solid #3b82f6', width: 180, textAlign: 'center', borderRadius: '8px' } },
-    { id: 'sanya', position: { x: 180, y: 200 }, data: { label: 'Sanya (Research)' }, style: { background: '#581c87', color: '#d8b4fe', border: '1px solid #a855f7', width: 180, textAlign: 'center', borderRadius: '8px' } },
-    { id: 'arjun', position: { x: 620, y: 200 }, data: { label: 'Arjun (Product)' }, style: { background: '#78350f', color: '#fcd34d', border: '1px solid #f59e0b', width: 180, textAlign: 'center', borderRadius: '8px' } },
+    { id: 'aarav', position: { x: 400, y: 100 }, data: { label: 'Aarav (Lead)' }, style: { background: '#1e3a8a', color: '#93c5fd', border: '1px solid #3b82f6', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
+    { id: 'sanya', position: { x: 180, y: 200 }, data: { label: 'Sanya (Research)' }, style: { background: '#581c87', color: '#d8b4fe', border: '1px solid #a855f7', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
+    { id: 'arjun', position: { x: 620, y: 200 }, data: { label: 'Arjun (Product)' }, style: { background: '#78350f', color: '#fcd34d', border: '1px solid #f59e0b', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
     
     // Architecture
-    { id: 'rohit', position: { x: 400, y: 320 }, data: { label: 'Rohit (Architect)' }, style: { background: '#7c2d12', color: '#fdba74', border: '1px solid #f97316', width: 180, textAlign: 'center', borderRadius: '8px' } },
+    { id: 'rohit', position: { x: 400, y: 320 }, data: { label: 'Rohit (Architect)' }, style: { background: '#7c2d12', color: '#fdba74', border: '1px solid #f97316', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
     
     // Builders
-    { id: 'vikram', position: { x: 50, y: 480 }, data: { label: 'Vikram (Backend)' }, style: { background: '#14532d', color: '#86efac', border: '1px solid #22c55e', width: 180, textAlign: 'center', borderRadius: '8px' } },
-    { id: 'neha', position: { x: 280, y: 480 }, data: { label: 'Neha (Frontend)' }, style: { background: '#831843', color: '#f9a8d4', border: '1px solid #ec4899', width: 180, textAlign: 'center', borderRadius: '8px' } },
-    { id: 'kunal', position: { x: 520, y: 480 }, data: { label: 'Kunal (DevOps)' }, style: { background: '#164e63', color: '#67e8f9', border: '1px solid #06b6d4', width: 180, textAlign: 'center', borderRadius: '8px' } },
+    { id: 'vikram', position: { x: 50, y: 480 }, data: { label: 'Vikram (Backend)' }, style: { background: '#14532d', color: '#86efac', border: '1px solid #22c55e', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
+    { id: 'neha', position: { x: 280, y: 480 }, data: { label: 'Neha (Frontend)' }, style: { background: '#831843', color: '#f9a8d4', border: '1px solid #ec4899', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
+    { id: 'kunal', position: { x: 520, y: 480 }, data: { label: 'Kunal (DevOps)' }, style: { background: '#164e63', color: '#67e8f9', border: '1px solid #06b6d4', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
     
     // Security & Preview
-    { id: 'cipher', position: { x: 750, y: 480 }, data: { label: 'Cipher (Red Team)' }, style: { background: '#7f1d1d', color: '#fca5a5', border: '1px solid #ef4444', width: 180, textAlign: 'center', borderRadius: '8px' } },
-    { id: 'maya', position: { x: 280, y: 560 }, data: { label: 'Maya (Preview)' }, style: { background: '#831843', color: '#fbcfe8', border: '1px solid #f472b6', width: 180, textAlign: 'center', borderRadius: '8px' } },
+    { id: 'cipher', position: { x: 750, y: 480 }, data: { label: 'Cipher (Red Team)' }, style: { background: '#7f1d1d', color: '#fca5a5', border: '1px solid #ef4444', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
+    { id: 'maya', position: { x: 280, y: 560 }, data: { label: 'Maya (Preview)' }, style: { background: '#831843', color: '#fbcfe8', border: '1px solid #f472b6', width: 180, textAlign: 'center' as any, borderRadius: '8px' } },
 
     // QA & Output
-    { id: 'pooja', type: 'output', position: { x: 400, y: 650 }, data: { label: 'Pooja (QA Verified)' }, style: { background: '#991b1b', color: '#fca5a5', border: '1px solid #f87171', width: 200, textAlign: 'center', borderRadius: '8px', fontWeight: 'bold' } },
+    { id: 'pooja', type: 'output', position: { x: 400, y: 650 }, data: { label: 'Pooja (QA Verified)' }, style: { background: '#991b1b', color: '#fca5a5', border: '1px solid #f87171', width: 200, textAlign: 'center' as any, borderRadius: '8px', fontWeight: 'bold' } },
   ];
 
   const initialEdges = [
@@ -352,6 +352,62 @@ const AgentDashboard = () => {
       color: "purple",
       skills: ["User Interviews", "Usability Tests", "Feedback Loops"],
       desc: "Gathers real user feedback, conducts usability tests and identifies pain points."
+    },
+    
+    // --- NEW SPECIALIZED AGENTS ---
+    {
+      name: "Rudra",
+      role: "Shadow Ops Leader",
+      icon: Skull,
+      status: "Restricted",
+      color: "dark",
+      skills: ["Complex Proxies", "Bypass Tools", "Scraping"],
+      desc: "Second team leader for restricted or highly complex operations."
+    },
+    {
+      name: "Kavya",
+      role: "Generative Media",
+      icon: Sparkles,
+      status: "Idle",
+      color: "pink",
+      skills: ["Midjourney", "Sora", "AudioSynth"],
+      desc: "Advanced media generation including images, video, and audio assets."
+    },
+    {
+      name: "Dhruv",
+      role: "Future Tech",
+      icon: Cpu,
+      status: "Idle",
+      color: "cyan",
+      skills: ["Quantum", "BioTech", "Robotics"],
+      desc: "Pioneer of niche domains like quantum computing and robotics integration."
+    },
+    {
+      name: "Nyaya",
+      role: "Compliance Officer",
+      icon: Shield,
+      status: "Idle",
+      color: "blue",
+      skills: ["GDPR", "Ethics", "AI Act"],
+      desc: "Ensures all AI outputs and software comply with global laws and ethics."
+    },
+    {
+      name: "Sarva",
+      role: "Meta-Agent",
+      icon: Code,
+      status: "Idle",
+      color: "purple",
+      skills: ["Cross-Platform", "Translation", "Refactoring"],
+      desc: "Translates code seamlessly between any two programming languages or frameworks."
+    },
+    {
+      name: "Kuber",
+      role: "FinTech Analyst",
+      icon: TrendingUp,
+      status: "Idle",
+      color: "green",
+      skills: ["Trading Bots", "Payment Gateways", "Financial Models"],
+      desc: "Specializes in financial modeling, trading algorithms, and payment integrations."
     }
   ];
 

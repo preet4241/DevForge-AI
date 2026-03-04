@@ -24,6 +24,12 @@ import { NainaPersona } from './Naina';
 import { VivaanPersona } from './Vivaan';
 import { TaraPersona } from './Tara';
 import { MayaPersona } from './Maya';
+import { RudraPersona } from './Rudra';
+import { KavyaPersona } from './Kavya';
+import { DhruvPersona } from './Dhruv';
+import { NyayaPersona } from './Nyaya';
+import { SarvaPersona } from './Sarva';
+import { KuberPersona } from './Kuber';
 
 export const AGENT_PERSONAS: Record<string, string> = {
   Aarav: AaravPersona,
@@ -51,4 +57,10 @@ export const AGENT_PERSONAS: Record<string, string> = {
   Vivaan: VivaanPersona,
   Tara: TaraPersona,
   Maya: MayaPersona,
+  Rudra: RudraPersona,
+  Kavya: KavyaPersona,
+  Dhruv: DhruvPersona,
+  Nyaya: NyayaPersona,
+  Sarva: SarvaPersona,
+  Kuber: KuberPersona,
 };

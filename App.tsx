@@ -1,5 +1,6 @@
 
 import React, { lazy } from 'react';
+console.log('DEBUG: App.tsx React:', React);
 import { Routes, Route, HashRouter } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';

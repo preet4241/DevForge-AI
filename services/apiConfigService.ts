@@ -62,7 +62,7 @@ export class ApiConfigService {
       ...c,
       id: Date.now().toString() + Math.random().toString(36).substr(2, 4),
       enabled: true,
-      status: 'idle',
+      status: 'idle' as KeyStatus,
       totalCalls: 0,
       errorCount: 0,
       successRate: 100,

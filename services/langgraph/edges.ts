@@ -21,7 +21,7 @@ export const shouldLoop = (state: AgentState) => {
   
   // If critique is present, loop back to the first agent
   if (content.includes("critique") || content.includes("change") || content.includes("fix")) {
-    return "Author"; // Loop back to the author
+    return "retry"; // Loop back to the author
   }
 
   return "__end__"; // Default end if unsure

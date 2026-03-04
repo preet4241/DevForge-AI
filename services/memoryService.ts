@@ -1,6 +1,6 @@
 
-import { IdbStorage } from './idbStorage';
-import { getEmbedding } from './geminiService';
+import { getEmbedding } from './embeddingService';
+import { algebraDb } from './algebraDb';
 
 export type MemoryType = 'rule' | 'pattern' | 'anti-pattern' | 'critique' | 'scenario' | 'debate_outcome';
 
@@ -51,7 +51,6 @@ export interface AgentMemoryStore {
 }
 
 const STORAGE_KEY = 'devforge_memory_v1';
-const IDB_RULES_KEY = 'devforge_vector_memory';
 
 // --- BADGE DEFINITIONS ---
 export const AGENT_BADGES: Record<string, Badge> = {
@@ -133,7 +132,13 @@ const INITIAL_MEMORY: Record<string, AgentMemoryStore> = {
   Naina: createEmptyMemory('Naina'),
   Vivaan: createEmptyMemory('Vivaan'),
   Tara: createEmptyMemory('Tara'),
-  Maya: createEmptyMemory('Maya') // Live Preview Agent
+  Maya: createEmptyMemory('Maya'), // Live Preview Agent
+  Rudra: createEmptyMemory('Rudra'),
+  Kavya: createEmptyMemory('Kavya'),
+  Dhruv: createEmptyMemory('Dhruv'),
+  Nyaya: createEmptyMemory('Nyaya'),
+  Sarva: createEmptyMemory('Sarva'),
+  Kuber: createEmptyMemory('Kuber')
 };
 
 // --- VECTOR MATH ---
@@ -174,9 +179,10 @@ export class MemoryController {
       });
     }
 
-    // 2. Load Content from IndexedDB (Unlimited Capacity)
+    // 2. Load Content from AlgebraDB
     try {
-      const vectorData = await IdbStorage.get<Record<string, MemoryItem[]>>(IDB_RULES_KEY) || {};
+      await algebraDb.initialize();
+      const vectorData = await algebraDb.getAllMemories();
       
       Object.keys(vectorData).forEach(agentId => {
         if (!this.memoryCache[agentId]) this.memoryCache[agentId] = createEmptyMemory(agentId);
@@ -187,7 +193,7 @@ export class MemoryController {
         this.memoryCache[agentId].antiPatterns = items.filter(i => i.type === 'anti-pattern');
       });
     } catch (e) {
-      console.error("Failed to load vector memory from IDB", e);
+      console.error("Failed to load vector memory from AlgebraDB", e);
     }
 
     this.initialized = true;
@@ -218,11 +224,8 @@ export class MemoryController {
     mem.patterns = [];
     mem.antiPatterns = [];
     
-    // Persist clear to IDB
-    const vectorData = await IdbStorage.get<Record<string, MemoryItem[]>>(IDB_RULES_KEY) || {};
-    vectorData[agentId] = [];
-    await IdbStorage.set(IDB_RULES_KEY, vectorData);
-    
+    await algebraDb.clearAgentMemory(agentId);
+
     // Don't clear stats
     this.saveStats();
   }
@@ -277,24 +280,13 @@ export class MemoryController {
     const queryEmbedding = await getEmbedding(query);
     if (!queryEmbedding) return []; // Fallback if embedding fails
 
-    // 2. Get all items for this agent from IDB (Unlimited storage source)
-    // Note: In a real production app with millions of vectors, we'd use a server-side vector DB.
-    // For "Unlimited" client-side, IDB is fine up to ~50k-100k items before it gets slow, which is plenty.
-    const vectorData = await IdbStorage.get<Record<string, MemoryItem[]>>(IDB_RULES_KEY) || {};
-    const agentItems = vectorData[agentId] || [];
-
-    // 3. Calculate Cosine Similarity
-    const scoredItems = agentItems
-      .filter(item => item.embedding && item.embedding.length > 0)
-      .map(item => ({
-        ...item,
-        similarity: cosineSimilarity(queryEmbedding, item.embedding!)
-      }));
-
-    // 4. Sort and Slice
-    return scoredItems
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK);
+    // 2. Search using AlgebraDB (Orama Vector Search)
+    try {
+      return await algebraDb.searchMemory(agentId, queryEmbedding, topK);
+    } catch (e) {
+      console.error("AlgebraDB search failed, falling back to basic search", e);
+      return [];
+    }
   }
 
   static addExperience(agentId: string, amount: number, skillsUsed: string[]) {
@@ -354,17 +346,15 @@ export class MemoryController {
       embedding: embedding || []
     };
 
-    // 2. Save to IDB (Async, Unlimited)
-    const vectorData = await IdbStorage.get<Record<string, MemoryItem[]>>(IDB_RULES_KEY) || {};
-    if (!vectorData[agentId]) vectorData[agentId] = [];
+    // 2. Save to AlgebraDB
+    const mem = this.getAgentMemory(agentId);
     
-    // Check duplicates
-    if (!vectorData[agentId].some(i => i.content === newItem.content)) {
-        vectorData[agentId].push(newItem);
-        await IdbStorage.set(IDB_RULES_KEY, vectorData);
-        
+    // Check duplicates in cache
+    const allItems = [...mem.rules, ...mem.patterns, ...mem.antiPatterns];
+    if (!allItems.some(i => i.content === newItem.content)) {
+        await algebraDb.insertMemory(agentId, newItem);
+
         // 3. Update In-Memory Cache for UI
-        const mem = this.getAgentMemory(agentId);
         if (type === 'rule') mem.rules.unshift(newItem);
         else if (type === 'pattern') mem.patterns.unshift(newItem);
         else mem.antiPatterns.unshift(newItem);

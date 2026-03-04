@@ -77,6 +77,14 @@ const AGENT_OPTIONS = [
   ]},
   { group: 'Support', options: [
     { value: 'Tara', label: 'Tara (UX Research)' }
+  ]},
+  { group: 'New Specialized Agents', options: [
+    { value: 'Rudra', label: 'Rudra (Shadow Ops)' },
+    { value: 'Kavya', label: 'Kavya (Generative Media)' },
+    { value: 'Dhruv', label: 'Dhruv (Future Tech)' },
+    { value: 'Nyaya', label: 'Nyaya (Compliance)' },
+    { value: 'Sarva', label: 'Sarva (Meta-Agent)' },
+    { value: 'Kuber', label: 'Kuber (FinTech)' }
   ]}
 ];
 

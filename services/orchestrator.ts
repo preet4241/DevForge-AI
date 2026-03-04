@@ -1,5 +1,5 @@
 
-import { getAgentPersona, chatWithAgent, generateJSON } from './geminiService';
+import { getAgentPersona, chatWithAgent, generateJSON, AGENT_PERSONAS } from './geminiService';
 import { AgentMemoryService } from './agentMemoryService';
 import { Type } from '@google/genai';
 
@@ -22,7 +22,7 @@ export class Orchestrator {
     onStatusUpdate('Aarav', 'Classifying message and routing...');
     
     // Get all 25 agent names dynamically
-    const allAgentNames = Object.keys(require('./geminiService').AGENT_PERSONAS);
+    const allAgentNames = Object.keys(AGENT_PERSONAS);
     const agentNamesString = allAgentNames.join(', ');
 
     const aaravSchema = {
