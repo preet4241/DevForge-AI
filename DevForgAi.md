@@ -7,7 +7,7 @@ DevForge AI Builder is an advanced platform where a swarm of autonomous AI agent
 **Tech Stack:**
 - **Frontend**: React 19, React Router DOM, Vite, Tailwind CSS, Monaco Editor, React Flow (visual logic builder), xterm.js (terminal), Lucide React.
 - **Backend**: Express.js, Socket.io (for terminal PTY), tsx.
-- **Database/Storage**: Firebase Realtime Database (RTDB) for projects and agent memories, IndexedDB (`idb-keyval`) for vector memory (RAG), LocalStorage for caching. Supabase schema exists but is currently inactive in frontend services.
+- **Database/Storage**: Firebase Realtime Database (RTDB) for projects and agent memories, IndexedDB (`idb-keyval`) for vector memory (RAG), LocalStorage for caching.
 - **APIs/AI**: Google GenAI (`@google/genai`), LangChain/LangGraph (`@langchain/langgraph`). Custom `UniversalLLM` dispatcher supports Gemini, OpenAI, Anthropic, OpenRouter, and Ollama.
 
 ## 2. Frontend
@@ -57,13 +57,9 @@ DevForge AI Builder is an advanced platform where a swarm of autonomous AI agent
 - **Firebase RTDB**:
   - `projects/{id}`: Stores project metadata and nested workspace files.
   - `agents/{agentId}/memories`: Stores agent learning memories (topic, summary, connections).
-- **Supabase (Defined in `database/schema.sql`, but currently unused in frontend)**:
-  - `projects`: id, name, description, type, status, metadata.
-  - `code_files`: id, project_id, name, language, content, path.
-  - `activity_logs`: id, project_id, agent_id, type, text, detail.
 
 **Relationships:**
-- In the SQL schema, `code_files` and `activity_logs` have a foreign key to `projects(id)` with `ON DELETE CASCADE`.
+- Currently using NoSQL structure in Firebase RTDB. Code files and activity logs are nested within or associated with the project ID.
 
 ## 5. Features Implemented
 **Working Features:**
@@ -78,14 +74,24 @@ DevForge AI Builder is an advanced platform where a swarm of autonomous AI agent
 - Workspace file syncing to local disk.
 
 **Partially-Done Features:**
-- **LangGraph Integration**: Graphs are defined in `services/langgraph/graphs.ts` (CrewAI, AutoGen, AutoGPT styles), but the main app currently uses a custom `Orchestrator` class (`services/orchestrator.ts`).
-- **Supabase Integration**: Schema exists, but data operations are currently routed through Firebase RTDB and LocalStorage.
+- **LangGraph Integration**: Graphs are defined in `services/langgraph/graphs.ts` but the main app currently uses a custom `Orchestrator` class (`services/orchestrator.ts`).
+  - **Implemented Architectures**:
+    1. **CrewAI Style (Supervisor)**: A supervisor node (Aarav) routes tasks to a list of worker agents. After a worker finishes, it returns to the supervisor to decide the next step or finish.
+    2. **AutoGen Style (Debate/Cyclic)**: A two-agent cyclic graph (Author and Reviewer). The Author generates content, the Reviewer reviews it, and it loops back to the Author based on a conditional edge until finished.
+    3. **AutoGPT Style (Autonomy/Tools)**: A single agent graph with a tool execution node. The agent can decide to use a tool, which routes to the `toolNode`, executes the tool, and returns the result to the agent.
+  - **Nodes (`nodes.ts`)**:
+    - `createAgentNode`: Wraps `chatWithAgent` to work within the LangGraph state, converting LangChain messages.
+    - `createSupervisorNode`: Uses Aarav to decide which worker should act next based on the conversation history.
+    - `toolNode`: A simple heuristic-based tool executor that parses "TOOL_CALL:" strings (e.g., SEARCH, CALCULATE).
+  - **Edges (`edges.ts`)**: Defines routing logic (`shouldContinue`, `shouldLoop`, `shouldUseTool`).
+  - **State (`types.ts`)**: Defines `AgentState` with channels for messages, next, and sender.
+
 
 ## 6. Current Errors & Issues
 **Known Bugs and Errors:**
 - **Terminal PTY Fallback**: The backend uses `python3 -c 'import pty; pty.spawn("/bin/bash")'` on Unix systems. This will fail if Python 3 is not installed on the host machine.
 - **Voice Input**: Relies on the experimental browser `SpeechRecognition` API, which has inconsistent support across different browsers (works best in Chrome).
-- **Database Duality**: The presence of both Firebase RTDB logic and a Supabase SQL schema creates architectural ambiguity.
+- **Database Duality**: [DONE] Supabase SQL schema and dependencies have been completely removed. The project now exclusively uses Firebase RTDB.
 
 **Files/Modules Causing Problems:**
 - `server.ts`: The terminal spawning logic is fragile depending on the host OS environment.
@@ -103,4 +109,4 @@ DevForge AI Builder is an advanced platform where a swarm of autonomous AI agent
 
 **Things That Are Broken and Need Fixing:**
 - **Security**: The terminal WebSocket endpoint must be secured with authentication before any public deployment.
-- **Database Consolidation**: Decide between Firebase RTDB and Supabase, and remove the unused implementation to clean up the codebase.
+- **Database Consolidation**: [DONE] Removed Supabase implementation to clean up the codebase.
