@@ -83,7 +83,7 @@ const Console: React.FC<ConsoleProps> = ({ onClose }) => {
     if (logIntervalRef.current) {
       clearInterval(logIntervalRef.current);
     }
-    logIntervalRef.current = setInterval(() => {
+    logIntervalRef.current = window.setInterval(() => {
       addRandomLog();
     }, 1500); // Add a new log every 1.5 seconds
   };
