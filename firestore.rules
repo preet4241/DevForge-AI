@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidString(text, maxLen) {
+      return text is string && text.size() <= maxLen;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Projects (Parent document for Chat)
+    // Note: The app currently stores Project metadata in RTDB, but Chat in Firestore.
+    // We allow authenticated users to access projects.
+    match /projects/{projectId} {
+      allow read, write: if isAuthenticated();
+
+      // Chat Messages
+      match /chat/{messageId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() 
+                      && hasRequiredFields(['id', 'role', 'text', 'timestamp'])
+                      && isValidString(request.resource.data.text, 10000)
+                      && request.resource.data.role in ['user', 'model', 'system'];
+        allow update: if isAuthenticated()
+                      && isValidString(request.resource.data.text, 10000);
+        allow delete: if isAuthenticated();
+      }
+    }
+
+    // Agent Memories
+    match /agent_memories/{memoryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+                    && hasRequiredFields(['id', 'agentId', 'type', 'content', 'timestamp'])
+                    && isValidString(request.resource.data.content, 5000)
+                    && request.resource.data.type in ['rule', 'pattern', 'anti-pattern', 'scenario', 'critique'];
+      allow update: if isAuthenticated()
+                    && isValidString(request.resource.data.content, 5000);
+      allow delete: if isAuthenticated();
+    }
+  }
+}

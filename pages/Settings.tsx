@@ -4,10 +4,11 @@ import {
   Cpu, Database, Trash2, Shield, Zap, Monitor, 
   HardDrive, AlertTriangle, Check, Terminal,
   Brain, Sliders, Eraser, Activity, Lock, Plus, Key, Globe, User, ExternalLink, Eye, EyeOff, Globe2, ChevronRight, MousePointer2, ChevronDown,
-  RefreshCw, Power, Settings as SettingsIcon, MoreVertical, List, Layers, Clock, BarChart3
+  RefreshCw, Power, Settings as SettingsIcon, MoreVertical, List, Layers, Clock, BarChart3, Github
 } from 'lucide-react';
 import { Card, Button, Badge, Tooltip } from '../components/UI';
 import { ApiConfigService, ApiKeyConfig, ApiProvider } from '../services/apiConfigService';
+import { GitHubService, GitHubAccount } from '../services/githubService';
 
 const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => (
   <button 
@@ -168,6 +169,9 @@ const Settings = () => {
   // Database Settings
   const [dbStatus, setDbStatus] = useState(false);
   const [isEnvManaged, setIsEnvManaged] = useState(false);
+  
+  // GitHub Settings
+  const [githubAccounts, setGithubAccounts] = useState<GitHubAccount[]>([]);
 
   const [storageStats, setStorageStats] = useState({
     projects: 0,
@@ -181,6 +185,9 @@ const Settings = () => {
     const saved = localStorage.getItem('devforge_prefs');
     if (saved) setPreferences(JSON.parse(saved));
     setApiConfigs(ApiConfigService.getConfigs());
+    
+    // Load GitHub Accounts
+    GitHubService.getConnectedAccounts().then(setGithubAccounts).catch(console.error);
 
     const projects = JSON.parse(localStorage.getItem('projects') || '[]');
     const memoryStore = JSON.parse(localStorage.getItem('devforge_memory_v1') || '{}');
@@ -206,6 +213,25 @@ const Settings = () => {
   const showNotification = (msg: string) => {
     setNotification({ msg, type: 'success' });
     setTimeout(() => setNotification(null), 3000);
+  };
+
+  const handleConnectGithub = async () => {
+    try {
+      const account = await GitHubService.connectAccount();
+      setGithubAccounts(prev => [...prev, account]);
+      showNotification(`Connected to GitHub as ${account.username}`);
+    } catch (error: any) {
+      console.error("GitHub Connect Error", error);
+      alert(`Failed to connect: ${error.message}`);
+    }
+  };
+
+  const handleDisconnectGithub = async (id: string) => {
+    if (confirm('Disconnect this GitHub account?')) {
+      await GitHubService.disconnectAccount(id);
+      setGithubAccounts(prev => prev.filter(a => a.id !== id));
+      showNotification("GitHub account disconnected");
+    }
   };
 
   const handleAddApi = () => {
@@ -317,6 +343,37 @@ const Settings = () => {
              )}
           </div>
         </Card>
+      </Section>
+
+      {/* --- GITHUB INTEGRATION --- */}
+      <Section title="GitHub Integration" icon={Github} description="Manage connected GitHub accounts for project syncing.">
+        <div className="grid gap-3">
+          {githubAccounts.map(account => (
+            <Card key={account.id} className="border-zinc-800 flex items-center justify-between p-4">
+              <div className="flex items-center gap-4">
+                <img src={account.avatarUrl} alt={account.username} className="w-10 h-10 rounded-full border border-zinc-700" />
+                <div>
+                  <h4 className="font-bold text-white">{account.username}</h4>
+                  <p className="text-xs text-zinc-500">Connected {new Date(account.connectedAt).toLocaleDateString()}</p>
+                </div>
+              </div>
+              <Button variant="outline" onClick={() => handleDisconnectGithub(account.id)} className="text-red-400 hover:bg-red-500/10 border-red-500/20">
+                Disconnect
+              </Button>
+            </Card>
+          ))}
+          
+          {githubAccounts.length === 0 && (
+             <div className="text-center py-6 border-2 border-dashed border-zinc-800 rounded-xl">
+               <Github className="mx-auto text-zinc-700 mb-2" size={24} />
+               <p className="text-zinc-500 text-sm">No GitHub accounts connected.</p>
+             </div>
+          )}
+
+          <Button onClick={handleConnectGithub} className="w-full py-3 flex items-center justify-center gap-2">
+            <Plus size={16} /> Connect GitHub Account
+          </Button>
+        </div>
       </Section>
 
       {/* --- API CONNECTIONS --- */}

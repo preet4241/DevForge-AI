@@ -6,6 +6,10 @@ import { spawn } from 'child_process';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
+import axios from 'axios';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 async function startServer() {
   const app = express();
@@ -70,6 +74,83 @@ async function startServer() {
 
   // API routes FIRST
   app.use(express.json({ limit: '50mb' })); // Add JSON body parser with increased limit for files
+
+  // --- GitHub OAuth ---
+  const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
+  const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+  // Use the APP_URL environment variable if available, otherwise fallback to localhost
+  // Note: In the preview environment, APP_URL is provided.
+  const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
+
+  app.get('/api/auth/github', (req, res) => {
+    if (!GITHUB_CLIENT_ID) {
+      return res.status(500).send('GitHub Client ID not configured');
+    }
+    const redirectUri = `${APP_URL}/api/auth/github/callback`;
+    const scope = 'repo user';
+    const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${redirectUri}&scope=${scope}`;
+    res.redirect(url);
+  });
+
+  app.get('/api/auth/github/callback', async (req, res) => {
+    const { code } = req.query;
+    if (!code) {
+      return res.status(400).send('No code provided');
+    }
+
+    try {
+      // Exchange code for token
+      const tokenRes = await axios.post('https://github.com/login/oauth/access_token', {
+        client_id: GITHUB_CLIENT_ID,
+        client_secret: GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: `${APP_URL}/api/auth/github/callback`
+      }, {
+        headers: { Accept: 'application/json' }
+      });
+
+      if (tokenRes.data.error) {
+        throw new Error(tokenRes.data.error_description);
+      }
+
+      const accessToken = tokenRes.data.access_token;
+
+      // Fetch user profile
+      const userRes = await axios.get('https://api.github.com/user', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+
+      const profile = userRes.data;
+
+      // Send back to client via postMessage
+      const script = `
+        <script>
+          window.opener.postMessage({
+            type: 'GITHUB_AUTH_SUCCESS',
+            payload: {
+              accessToken: '${accessToken}',
+              profile: ${JSON.stringify(profile)}
+            }
+          }, '*');
+          window.close();
+        </script>
+      `;
+      res.send(script);
+
+    } catch (error: any) {
+      console.error('GitHub Auth Error:', error.message);
+      const script = `
+        <script>
+          window.opener.postMessage({
+            type: 'GITHUB_AUTH_ERROR',
+            error: '${error.message}'
+          }, '*');
+          window.close();
+        </script>
+      `;
+      res.send(script);
+    }
+  });
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });

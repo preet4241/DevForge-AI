@@ -1,9 +1,20 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Bot, Code, Cpu, Sparkles, Package, Zap, Layers, Terminal, Database, Globe, Smartphone, CheckCircle2, Rocket, GitBranch } from 'lucide-react';
+import { ArrowRight, Bot, Code, Cpu, Sparkles, Package, Zap, Layers, Terminal, Database, Globe, Smartphone, CheckCircle2, Rocket, GitBranch, LogIn, LogOut } from 'lucide-react';
 import { Button, Card } from '../components/UI';
+import { auth, signInWithGoogle } from '../services/firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
 
 const Home = () => {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
   return (
     <div className="relative min-h-full overflow-x-hidden">
       {/* Fixed Full-Screen Background Container */}
@@ -53,17 +64,32 @@ const Home = () => {
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6 pt-6">
-            <Link to="/projects" className="w-full sm:w-auto">
-              <Button className="h-14 px-10 text-xl w-full group shadow-[0_0_30px_rgba(249,115,22,0.2)] hover:shadow-[0_0_40px_rgba(249,115,22,0.4)]">
-                Start Building <ArrowRight size={22} className="group-hover:translate-x-1 transition-transform" />
+            {!user ? (
+              <Button 
+                onClick={signInWithGoogle}
+                className="h-14 px-10 text-xl w-full sm:w-auto group shadow-[0_0_30px_rgba(249,115,22,0.2)] hover:shadow-[0_0_40px_rgba(249,115,22,0.4)]"
+              >
+                <LogIn className="mr-2" size={22} /> Sign In to Build
               </Button>
-            </Link>
+            ) : (
+              <Link to="/projects" className="w-full sm:w-auto">
+                <Button className="h-14 px-10 text-xl w-full group shadow-[0_0_30px_rgba(249,115,22,0.2)] hover:shadow-[0_0_40px_rgba(249,115,22,0.4)]">
+                  Start Building <ArrowRight size={22} className="group-hover:translate-x-1 transition-transform" />
+                </Button>
+              </Link>
+            )}
             <Link to="/templates" className="w-full sm:w-auto">
               <Button variant="outline" className="h-14 px-10 text-xl w-full border-zinc-800 hover:bg-zinc-800/50 backdrop-blur-sm">
                 Explore Templates
               </Button>
             </Link>
           </div>
+          
+          {user && (
+            <div className="text-zinc-500 text-sm">
+              Signed in as {user.email} <button onClick={() => auth.signOut()} className="text-orange-500 hover:underline ml-2">Sign Out</button>
+            </div>
+          )}
         </div>
 
         {/* Features Grid */}

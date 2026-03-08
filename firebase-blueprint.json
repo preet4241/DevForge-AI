@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "A user project containing chat history and settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["id", "name", "createdAt", "ownerId"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "A message in the project chat history.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "model", "system"] },
+        "text": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "agentName": { "type": "string" }
+      },
+      "required": ["id", "role", "text", "timestamp"]
+    },
+    "AgentMemory": {
+      "title": "Agent Memory",
+      "description": "A memory item for an AI agent.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "agentId": { "type": "string" },
+        "type": { "type": "string", "enum": ["rule", "pattern", "anti-pattern", "scenario", "critique"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "useCount": { "type": "number" },
+        "embedding": { "type": "array", "items": { "type": "number" } },
+        "domain": { "type": "string" },
+        "scenarioContext": { "type": "string" },
+        "critiqueTarget": { "type": "string" }
+      },
+      "required": ["id", "agentId", "type", "content", "timestamp"]
+    }
+  },
+  "firestore": {
+    "projects/{projectId}": {
+      "schema": "Project",
+      "description": "Stores project details."
+    },
+    "projects/{projectId}/chat/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Stores chat messages for a project."
+    },
+    "agent_memories/{memoryId}": {
+      "schema": "AgentMemory",
+      "description": "Stores agent memories."
+    }
+  }
+}

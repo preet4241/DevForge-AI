@@ -48,7 +48,34 @@ export class KeyPoolService {
       return availableGlobalKey;
     }
 
-    // 3. No keys available, join queue
+    // 3. Fallback to System Environment Key (if available)
+    // This prevents hanging if no user keys are configured
+    if (process.env.GEMINI_API_KEY) {
+        // Create a temporary config for the system key
+        const systemKeyConfig: ApiKeyConfig = {
+            id: 'system-env-key',
+            provider: 'gemini',
+            key: process.env.GEMINI_API_KEY,
+            scope: 'global',
+            modelId: 'gemini-2.0-flash-exp', // Default model
+            label: 'System Environment Key',
+            enabled: true,
+            status: 'idle',
+            totalCalls: 0,
+            errorCount: 0,
+            successRate: 100,
+            currentRpm: 0
+        };
+        return systemKeyConfig;
+    }
+
+    // 4. No keys available and no system key -> REJECT immediately
+    // Do not queue if there are no keys at all, otherwise it hangs forever.
+    if (configs.length === 0) {
+        throw new Error("API key not found. Please add your key in Settings.");
+    }
+
+    // 5. Keys exist but are busy -> Join queue
     return new Promise((resolve, reject) => {
       this.queue.push({ agentName, resolve, reject });
     });

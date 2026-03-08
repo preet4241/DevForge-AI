@@ -4,7 +4,7 @@ import {
   Bot, ChevronLeft, Wrench, MessageSquare, Monitor, Terminal, Paperclip, X, FileCode, 
   ArrowUp, Activity, MoreVertical, Rocket, Zap, Globe, Download, Code, Maximize2, Minimize2, Copy, Check,
   Ghost, MessageCircleWarning, Trash2, BookOpen, Sparkles, Book, BrainCircuit, Save,
-  Play, Square, MessageCircle, ClipboardList, Smartphone, Tablet, Settings, Loader2
+  Play, Square, MessageCircle, ClipboardList, Smartphone, Tablet, Settings, Loader2, Github
 } from 'lucide-react';
 import { Button, Badge, Tooltip } from '../components/UI';
 import { Orchestrator } from '../services/orchestrator';
@@ -20,6 +20,9 @@ import { useToast } from '../components/Toast';
 import { runGraph } from '../services/langgraph/graphs';
 import { useIDE } from '../contexts/IDEContext';
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { collection, addDoc, query, orderBy, limit, getDocs, startAfter, doc, setDoc, onSnapshot, getDoc, Timestamp, where } from "firebase/firestore";
+import { db } from "../services/firebase";
+import { GitSyncModal } from '../components/GitSyncModal';
 
 interface Message {
   id: string;
@@ -91,6 +94,7 @@ const Chat = () => {
   
   const [showWhisperModal, setShowWhisperModal] = useState(false);
   const [showTasksModal, setShowTasksModal] = useState(false);
+  const [showGitModal, setShowGitModal] = useState(false);
   
   const [viewMode, setViewMode] = useState<'chat' | 'preview'>('chat');
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
@@ -110,6 +114,12 @@ const Chat = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState('');
   
+  // Lazy Loading State
+  const [lastVisible, setLastVisible] = useState<any>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
   // Aarav Thinking State
   const [thinkingLogs, setThinkingLogs] = useState<string[]>([]);
   const [currentThinkingText, setCurrentThinkingText] = useState('');
@@ -402,6 +412,12 @@ const Chat = () => {
             };
 
             setMessages(prev => [...prev, newMsg]);
+
+            // Save to Firebase
+            if (project?.id) {
+              setDoc(doc(db, "projects", project.id, "chat", newMsg.id), newMsg)
+                .catch(e => console.error("Failed to save message to Firebase", e));
+            }
           },
           onToolCall: (toolName, output) => {
             handleAddLog({
@@ -426,6 +442,93 @@ const Chat = () => {
     }
   };
 
+  // Load initial chat history
+  useEffect(() => {
+    if (!project?.id) return;
+
+    const fetchMessages = async () => {
+      try {
+        const q = query(
+          collection(db, "projects", project.id, "chat"),
+          orderBy("timestamp", "desc"),
+          limit(20)
+        );
+        const snapshot = await getDocs(q);
+        
+        const loadedMessages: Message[] = [];
+        snapshot.forEach(doc => {
+          loadedMessages.push({ id: doc.id, ...doc.data() } as Message);
+        });
+        
+        if (loadedMessages.length > 0) {
+          setMessages(loadedMessages.reverse());
+          setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+          setHasMore(snapshot.docs.length === 20);
+        }
+      } catch (error) {
+        console.error("Failed to load chat history:", error);
+      }
+    };
+
+    fetchMessages();
+  }, [project?.id]);
+
+  const loadMoreMessages = async () => {
+    if (!project?.id || !lastVisible || loadingMore || !hasMore) return;
+    
+    setLoadingMore(true);
+    // Save current scroll height to maintain position
+    const scrollContainer = chatContainerRef.current;
+    const previousScrollHeight = scrollContainer ? scrollContainer.scrollHeight : 0;
+
+    try {
+      const q = query(
+        collection(db, "projects", project.id, "chat"),
+        orderBy("timestamp", "desc"),
+        startAfter(lastVisible),
+        limit(20)
+      );
+      
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        setHasMore(false);
+        setLoadingMore(false);
+        return;
+      }
+
+      const newMessages: Message[] = [];
+      snapshot.forEach(doc => {
+        newMessages.push({ id: doc.id, ...doc.data() } as Message);
+      });
+      
+      setMessages(prev => [...newMessages.reverse(), ...prev]);
+      setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === 20);
+
+      // Restore scroll position
+      if (scrollContainer) {
+        requestAnimationFrame(() => {
+          scrollContainer.scrollTop = scrollContainer.scrollHeight - previousScrollHeight;
+        });
+      }
+      
+    } catch (error) {
+      console.error("Failed to load more messages:", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleScroll = () => {
+    if (chatContainerRef.current) {
+      const { scrollTop } = chatContainerRef.current;
+      if (scrollTop === 0 && hasMore && !loadingMore) {
+        loadMoreMessages();
+      }
+    }
+  };
+
   const handleAddLog = (log: Omit<ActivityLogEntry, 'id' | 'timestamp'>) => {
     const newLog: ActivityLogEntry = {
       ...log,
@@ -440,7 +543,26 @@ const Chat = () => {
     }
   };
 
+  const handleProjectUpdate = async (updatedProject: any) => {
+    await StorageService.saveProject(updatedProject);
+    setProject(updatedProject);
+    localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+    
+    // Sync with IDE context
+    if (updatedProject.codeFiles) {
+      updatedProject.codeFiles.forEach((f: any) => {
+         ideDispatch({ type: 'CREATE_NODE', payload: { path: f.name, type: 'file', content: f.content } });
+      });
+    }
+  };
+
   const startAnalysis = async (prompt: string) => {
+    if (isLoading) return;
+    setIsLoading(true);
+    
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     setPendingPrompt(prompt);
     
     // Add user message immediately
@@ -451,6 +573,15 @@ const Chat = () => {
       timestamp: Date.now()
     };
     setMessages(prev => [...prev, userMsg]);
+
+    // Save to Firebase
+    if (project?.id) {
+      try {
+        await setDoc(doc(db, "projects", project.id, "chat", userMsg.id), userMsg);
+      } catch (e) {
+        console.error("Failed to save message to Firebase", e);
+      }
+    }
     
     setWorkflowStage('analyzing');
     setIsModalOpen(false); // Keep modal closed during thinking
@@ -458,13 +589,27 @@ const Chat = () => {
     setCurrentThinkingText('');
     
     try {
+      if (abortController.signal.aborted) throw new Error("Process stopped by user.");
+
       // 180s timeout for plan generation (increased from 60s)
       const timeoutPromise = new Promise<string>((_, reject) => 
         setTimeout(() => reject(new Error("Analysis timed out")), 180000)
       );
 
+      let firstChunkReceived = false;
+      const firstChunkTimeoutPromise = new Promise<string>((_, reject) => 
+        setTimeout(() => {
+          if (!firstChunkReceived) {
+            reject(new Error("Aarav could not generate a plan. Please try again."));
+          }
+        }, 30000)
+      );
+
+      console.log("CALLING LLM NOW", prompt);
       const plan = await Promise.race([
         generateDetailedPlan(prompt, (text) => {
+          if (abortController.signal.aborted) return;
+          firstChunkReceived = true;
           setCurrentThinkingText(prev => {
             const newText = prev + text;
             if (newText.includes('\n')) {
@@ -478,25 +623,43 @@ const Chat = () => {
             return newText;
           });
         }),
-        timeoutPromise
+        timeoutPromise,
+        firstChunkTimeoutPromise
       ]);
+      console.log("LLM RESPONSE", plan);
       
+      if (abortController.signal.aborted) throw new Error("Process stopped by user.");
+
       setGeneratedPlan(plan);
       setWorkflowStage('plan_review');
       setIsModalOpen(true); // Open modal only when plan is ready
-    } catch (error) {
-      console.error("Analysis failed:", error);
-      showToast("Failed to generate plan. Please try again.", "error");
+    } catch (error: any) {
+      if (error.message === "Process stopped by user.") {
+        return;
+      }
+      console.error("LLM FAILED", error);
+      showToast(error.message || "Failed to generate plan. Please try again.", "error");
       
-      setMessages(prev => [...prev, {
+      const errorMsg: Message = {
         id: Date.now().toString(),
         role: 'model',
-        text: "⚠️ **Aarav Error:** Failed to generate project plan. Please try again.",
+        text: `⚠️ **Aarav Error:** ${error.message || "Failed to generate project plan. Please try again."}`,
         timestamp: Date.now(),
         agentName: 'Aarav'
-      }]);
+      };
+      
+      setMessages(prev => [...prev, errorMsg]);
+      
+      // Save error to Firebase
+      if (project?.id) {
+        setDoc(doc(db, "projects", project.id, "chat", errorMsg.id), errorMsg)
+          .catch(e => console.error("Failed to save error message", e));
+      }
       
       setWorkflowStage('idle');
+    } finally {
+      setIsLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -529,6 +692,12 @@ const Chat = () => {
   };
 
   const handleStartBuilding = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
+    
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     setIsModalOpen(false);
     setWorkflowStage('executing');
     
@@ -540,9 +709,19 @@ const Chat = () => {
       timestamp: Date.now()
     };
     setMessages(prev => [...prev, userMsg]);
-    setIsLoading(true);
+    
+    // Save to Firebase
+    if (project?.id) {
+      try {
+        await setDoc(doc(db, "projects", project.id, "chat", userMsg.id), userMsg);
+      } catch (e) {
+        console.error("Failed to save message to Firebase", e);
+      }
+    }
 
     try {
+      if (abortController.signal.aborted) throw new Error("Process stopped by user.");
+
       // Step 4a: Architecture Agent
       handleAddLog({
         agentId: 'Architecture',
@@ -554,6 +733,8 @@ const Chat = () => {
 
       const structure = await generateArchitectureManifest(generatedPlan, qaAnswers);
       
+      if (abortController.signal.aborted) throw new Error("Process stopped by user.");
+
       // Execute file creation
       for (const item of structure) {
         ideDispatch({
@@ -582,9 +763,6 @@ ${JSON.stringify(qaAnswers, null, 2)}
 
 Project structure has been scaffolded. Now implement the code for these files.
       `.trim();
-
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
 
       // Convert messages for LangChain
       const history = messages.map(m => 
@@ -652,12 +830,38 @@ Project structure has been scaffolded. Now implement the code for these files.
     }
   };
 
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+    setWorkflowStage('idle');
+    showToast("Generation stopped by user.", "info");
+    
+    const stopMsg: Message = {
+        id: Date.now().toString(),
+        role: 'model',
+        text: '🛑 **Generation stopped by user.**',
+        timestamp: Date.now(),
+        agentName: 'System'
+    };
+    setMessages(prev => [...prev, stopMsg]);
+    
+    if (project?.id) {
+        setDoc(doc(db, "projects", project.id, "chat", stopMsg.id), stopMsg)
+            .catch(e => console.error("Failed to save stop message", e));
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
     
+    const prompt = inputValue;
+    setInputValue(''); // Clear input immediately
+    
     // Start the workflow instead of direct execution
-    await startAnalysis(inputValue);
-    setInputValue('');
+    await startAnalysis(prompt);
   };
 
   useEffect(() => {
@@ -756,6 +960,14 @@ Project structure has been scaffolded. Now implement the code for these files.
                <ClipboardList size={16} />
              </button>
            </Tooltip>
+           <Tooltip content="GitHub Sync">
+             <button 
+               onClick={() => setShowGitModal(true)}
+               className={`p-1.5 rounded-lg transition-all ${showGitModal ? 'bg-orange-500/10 text-orange-500' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
+             >
+               <Github size={16} />
+             </button>
+           </Tooltip>
            <Tooltip content="Artifacts">
              <button 
                onClick={() => setShowArtifacts(!showArtifacts)}
@@ -780,7 +992,16 @@ Project structure has been scaffolded. Now implement the code for these files.
         {/* CHAT AREA */}
         <div className="flex-1 flex flex-col min-w-0 bg-zinc-950 relative">
           {viewMode === 'chat' ? (
-            <div className="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-8 py-6 space-y-6">
+            <div 
+              ref={chatContainerRef}
+              onScroll={handleScroll}
+              className="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-8 py-6 space-y-6"
+            >
+              {loadingMore && (
+                <div className="flex justify-center py-2">
+                  <Loader2 size={16} className="animate-spin text-zinc-500" />
+                </div>
+              )}
               {messages.map((msg, i) => (
                 <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in group`}>
                   {msg.role === 'model' && (
@@ -1047,11 +1268,11 @@ Project structure has been scaffolded. Now implement the code for these files.
                     </Tooltip>
 
                     <Button 
-                      onClick={handleSendMessage}
-                      disabled={!inputValue.trim() || isLoading}
-                      className={`rounded-xl px-4 py-2 h-9 md:h-10 transition-all ${!inputValue.trim() || isLoading ? 'opacity-50 cursor-not-allowed bg-zinc-800 text-zinc-500' : 'bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-900/20 hover:shadow-orange-900/40'}`}
+                      onClick={isLoading ? handleStop : handleSendMessage}
+                      disabled={!inputValue.trim() && !isLoading}
+                      className={`rounded-xl px-4 py-2 h-9 md:h-10 transition-all ${(!inputValue.trim() && !isLoading) ? 'opacity-50 cursor-not-allowed bg-zinc-800 text-zinc-500' : isLoading ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/20 hover:shadow-red-900/40' : 'bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-900/20 hover:shadow-orange-900/40'}`}
                     >
-                      <ArrowUp size={18} />
+                      {isLoading ? <Square size={18} fill="currentColor" /> : <ArrowUp size={18} />}
                     </Button>
                   </div>
                 </div>
@@ -1304,6 +1525,13 @@ Project structure has been scaffolded. Now implement the code for these files.
           </div>
         </div>
       )}
+      {/* GIT SYNC MODAL */}
+      <GitSyncModal 
+        isOpen={showGitModal} 
+        onClose={() => setShowGitModal(false)} 
+        project={project} 
+        onProjectUpdate={handleProjectUpdate}
+      />
     </div>
   );
 };
