@@ -15,16 +15,16 @@ export const shouldLoop = (state: AgentState) => {
   const lastMessage = messages[messages.length - 1];
   const content = (lastMessage.content as string).toLowerCase();
 
-  if (content.includes("approved") || content.includes("looks good")) {
-    return "__end__";
+  if (content.includes("approved") || content.includes("looks good") || content.includes("lgtm")) {
+    return "end";
   }
   
   // If critique is present, loop back to the first agent
   if (content.includes("critique") || content.includes("change") || content.includes("fix")) {
-    return "retry"; // Loop back to the author
+    return "loop"; // Loop back to the author
   }
 
-  return "__end__"; // Default end if unsure
+  return "end"; // Default end if unsure
 };
 
 // --- Conditional Edge for Autonomy (Tool Usage) ---

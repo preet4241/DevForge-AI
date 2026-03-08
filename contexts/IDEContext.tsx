@@ -75,6 +75,103 @@ const updateNodePath = (node: FileNode, oldPrefix: string, newPrefix: string) =>
   }
 };
 
+const addNodeToTree = (root: FileNode, path: string, type: 'file' | 'folder', content?: string): FileNode => {
+  const newRoot = JSON.parse(JSON.stringify(root)); // Deep copy for simplicity
+  const parts = path.split('/').filter(p => p);
+  const name = parts.pop()!;
+  
+  let current = newRoot;
+  let currentPath = '';
+  
+  for (const part of parts) {
+    currentPath += (currentPath ? '/' : '') + part;
+    if (!current.children[part]) {
+      current.children[part] = {
+        id: currentPath,
+        name: part,
+        path: currentPath,
+        type: 'folder',
+        children: {}
+      };
+    }
+    current = current.children[part];
+  }
+  
+  current.children[name] = {
+    id: path,
+    name,
+    path,
+    type,
+    children: {},
+    content
+  };
+  
+  return newRoot;
+};
+
+const deleteNodeFromTree = (root: FileNode, path: string): FileNode => {
+  const newRoot = JSON.parse(JSON.stringify(root));
+  const parts = path.split('/').filter(p => p);
+  const name = parts.pop()!;
+  
+  let current = newRoot;
+  for (const part of parts) {
+    if (current.children[part]) {
+      current = current.children[part];
+    } else {
+      return newRoot; // Path not found
+    }
+  }
+  
+  delete current.children[name];
+  return newRoot;
+};
+
+const renameNodeInTree = (root: FileNode, oldPath: string, newPath: string): FileNode => {
+  const newRoot = JSON.parse(JSON.stringify(root));
+  const oldParts = oldPath.split('/').filter(p => p);
+  const oldName = oldParts.pop()!;
+  
+  let currentOldParent = newRoot;
+  for (const part of oldParts) {
+    if (currentOldParent.children[part]) {
+      currentOldParent = currentOldParent.children[part];
+    } else {
+      return newRoot; // Path not found
+    }
+  }
+  
+  const nodeToRename = currentOldParent.children[oldName];
+  if (!nodeToRename) return newRoot;
+  
+  delete currentOldParent.children[oldName];
+  
+  const newParts = newPath.split('/').filter(p => p);
+  const newName = newParts.pop()!;
+  
+  let currentNewParent = newRoot;
+  let currentPath = '';
+  for (const part of newParts) {
+    currentPath += (currentPath ? '/' : '') + part;
+    if (!currentNewParent.children[part]) {
+      currentNewParent.children[part] = {
+        id: currentPath,
+        name: part,
+        path: currentPath,
+        type: 'folder',
+        children: {}
+      };
+    }
+    currentNewParent = currentNewParent.children[part];
+  }
+  
+  nodeToRename.name = newName;
+  updateNodePath(nodeToRename, oldPath, newPath);
+  currentNewParent.children[newName] = nodeToRename;
+  
+  return newRoot;
+};
+
 // --- Reducer ---
 const ideReducer = (state: IDEState, action: IDEAction): IDEState => {
   switch (action.type) {
@@ -105,8 +202,17 @@ const ideReducer = (state: IDEState, action: IDEAction): IDEState => {
     case 'UPDATE_CONTENT':
       const newUnsavedFiles = new Set(state.unsavedFiles);
       newUnsavedFiles.add(action.payload.path);
+      
+      // Also update the fileSystem content if it's a file
+      const updatedFS = JSON.parse(JSON.stringify(state.fileSystem));
+      const nodeToUpdate = findNode(updatedFS, action.payload.path);
+      if (nodeToUpdate && nodeToUpdate.type === 'file') {
+        nodeToUpdate.content = action.payload.content;
+      }
+      
       return {
         ...state,
+        fileSystem: updatedFS,
         editorContents: { ...state.editorContents, [action.payload.path]: action.payload.content },
         unsavedFiles: newUnsavedFiles,
       };
@@ -128,9 +234,13 @@ const ideReducer = (state: IDEState, action: IDEAction): IDEState => {
     case 'SET_EXPANDED_FOLDERS':
         return { ...state, expandedFolders: action.payload };
 
+    case 'CREATE_NODE':
+      return {
+        ...state,
+        fileSystem: addNodeToTree(state.fileSystem, action.payload.path, action.payload.type, action.payload.content)
+      };
+
     case 'RENAME_NODE':
-        // Complex logic handled in component or specialized helper, 
-        // but for reducer, we update openTabs and activeTab
         const { oldPath, newPath } = action.payload;
         const renamedTabs = state.openTabs.map(t => t === oldPath ? newPath : (t.startsWith(oldPath + '/') ? t.replace(oldPath, newPath) : t));
         const renamedActive = state.activeTab === oldPath ? newPath : (state.activeTab?.startsWith(oldPath + '/') ? state.activeTab.replace(oldPath, newPath) : state.activeTab);
@@ -153,6 +263,7 @@ const ideReducer = (state: IDEState, action: IDEAction): IDEState => {
 
         return { 
             ...state, 
+            fileSystem: renameNodeInTree(state.fileSystem, oldPath, newPath),
             openTabs: renamedTabs, 
             activeTab: renamedActive, 
             unsavedFiles: renamedUnsaved,
@@ -182,6 +293,7 @@ const ideReducer = (state: IDEState, action: IDEAction): IDEState => {
 
         return { 
             ...state, 
+            fileSystem: deleteNodeFromTree(state.fileSystem, pathToDelete),
             openTabs: filteredTabs, 
             activeTab: nextActive, 
             unsavedFiles: filteredUnsaved,

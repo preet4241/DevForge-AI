@@ -62,6 +62,7 @@ const TYPE_COLORS: Record<ActivityLogType, string> = {
   error: 'bg-red-500',
   thinking: 'bg-pink-500',
   waiting: 'bg-zinc-700',
+  success: 'bg-green-600',
 };
 
 export const ActivityLogPanel: React.FC<Props> = ({ 

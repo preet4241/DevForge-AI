@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, GenerateContentResponse, Chat } from "@google/genai";
+import { GoogleGenAI, Type, GenerateContentResponse, Chat, ThinkingLevel } from "@google/genai";
 import { ApiConfigService, ApiKeyConfig } from "./apiConfigService";
 import { MemoryController, AGENT_BADGES } from "./memoryService";
 import { KeyPoolService } from "./keyPoolService";
@@ -104,7 +104,7 @@ class UniversalLLM {
   }
 
   static async generate(prompt: string, systemInstruction?: string, agentName: string = 'global', options: any = {}) {
-    const { signal, ...restOptions } = options;
+    const { signal, history = [], ...restOptions } = options;
     
     return await withRetry(async () => {
       const config = await KeyPoolService.acquireKey(agentName);
@@ -113,24 +113,49 @@ class UniversalLLM {
       try {
         let result: string;
         if (config.provider !== 'gemini') {
-          result = await this.callRestApi(config, prompt, systemInstruction, [], signal);
+          result = await this.callRestApi(config, prompt, systemInstruction, history, signal);
         } else {
           const ai = new GoogleGenAI({ apiKey: config.key });
-          const modelName = restOptions.model || config.modelId || 'gemini-3-pro-preview';
+          const modelName = restOptions.model || config.modelId || 'gemini-3.1-pro-preview';
           const genConfig: any = { ...restOptions };
           if (systemInstruction) {
             genConfig.systemInstruction = systemInstruction;
           }
 
-          const response = await raceWithSignal(
-            ai.models.generateContent({
-              model: modelName,
-              contents: prompt,
-              config: genConfig
-            }),
-            signal
-          );
-          result = response.text;
+          const contents = history.map((h: any) => ({
+            role: h.role,
+            parts: h.parts
+          }));
+          contents.push({ role: 'user', parts: [{ text: prompt }] });
+
+          if (options.onChunk) {
+            const response = await raceWithSignal(
+              ai.models.generateContentStream({
+                model: modelName,
+                contents: contents,
+                config: genConfig
+              }),
+              signal
+            );
+            
+            for await (const chunk of response) {
+              const text = chunk.text;
+              if (text) {
+                options.onChunk(text);
+                result += text;
+              }
+            }
+          } else {
+            const response = await raceWithSignal(
+              ai.models.generateContent({
+                model: modelName,
+                contents: contents,
+                config: genConfig
+              }),
+              signal
+            );
+            result = response.text || "";
+          }
         }
         success = true;
         return result;
@@ -181,8 +206,31 @@ const withRetry = async <T>(fn: () => Promise<T>, maxRetries = 3, initialDelay =
   }
 };
 
+export const getEmbedding = async (text: string): Promise<number[] | null> => {
+  try {
+    const customConfig = ApiConfigService.getConfigForAgent('global');
+    // We only support embeddings via Gemini for now
+    if (customConfig && customConfig.provider !== 'gemini') {
+      console.warn("Embeddings currently only supported for Gemini provider.");
+    }
+    
+    const apiKey = customConfig?.key || process.env.API_KEY;
+    if (!apiKey) return null;
 
-// Removed getEmbedding - moved to embeddingService.ts
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.embedContent({
+      model: "text-embedding-004",
+      contents: {
+        parts: [{ text }]
+      }
+    });
+    
+    return response.embeddings?.[0]?.values || null;
+  } catch (error) {
+    console.error("Failed to generate embedding:", error);
+    return null;
+  }
+};
 
 // --- EXPERT BEST PRACTICES LIBRARY ---
 export const BEST_PRACTICES = {
@@ -283,6 +331,33 @@ export const generateJSON = async (prompt: string, systemInstruction: string, sc
   }
 };
 
+export const scaffoldProject = async (description: string): Promise<{ path: string, type: 'file' | 'folder', content?: string }[]> => {
+  const prompt = `Based on the following project description, generate a smart folder and file structure.
+Description: ${description}
+
+Return ONLY a JSON array of objects with the following format:
+[
+  { "path": "src", "type": "folder" },
+  { "path": "src/index.js", "type": "file", "content": "// Entry point" }
+]
+Do not include markdown formatting or any other text.`;
+
+  try {
+    const response = await UniversalLLM.generate(
+      prompt,
+      "You are an expert software architect. Generate a minimal but complete project structure.",
+      "global",
+      { responseMimeType: "application/json" }
+    );
+    
+    const cleanJson = response.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(cleanJson);
+  } catch (e) {
+    console.error("Failed to scaffold project:", e);
+    return [];
+  }
+};
+
 export const generateShadowCritique = async (context: string) => {
   const schema = {
     type: Type.OBJECT,
@@ -298,7 +373,7 @@ export const generateShadowCritique = async (context: string) => {
       `Analyze this recent activity/code:\n"${context.slice(0, 1000)}..."\n\nIs there a flaw, race condition, security risk, or bad pattern? If yes, critique it. If it's perfect, return empty string for critique.`, 
       getAgentPersona('Shadow'), 
       schema, 
-      { temperature: 0.5, thinkingConfig: { thinkingBudget: 0 } } // Low temp for shadow, no thinking needed for quick critique
+      { temperature: 0.5 } // Low temp for shadow
     );
     return response;
   } catch (e) {
@@ -338,7 +413,7 @@ export const generateVerifiedCode = async (
     `;
     
     // Use flash for speed
-    const validationRes = await UniversalLLM.generate(validationPrompt, "You are a syntax validator.", undefined, { model: 'gemini-3-flash-preview', thinkingConfig: { thinkingBudget: 0 } });
+    const validationRes = await UniversalLLM.generate(validationPrompt, "You are a syntax validator.", undefined, { model: 'gemini-3-flash-preview', thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } });
     
     if (validationRes.includes("VALID") || attempts === maxRetries) {
       return generated;
@@ -359,7 +434,7 @@ export const generateProjectPlan = async (idea: string, type: string) => {
   const practice = BEST_PRACTICES[type as keyof typeof BEST_PRACTICES] || BEST_PRACTICES.software;
   try {
     const options: any = { 
-      thinkingConfig: { thinkingBudget: 1024 },
+      thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
       tools: [{googleSearch: {}}] 
     };
 
@@ -442,14 +517,78 @@ export const chatWithAgent = async (
 ) => {
   // Overriding system instruction with dynamic persona if agentName is provided
   const finalInstruction = agentName ? getAgentPersona(agentName) : systemInstruction;
-  return await UniversalLLM.generate(message, finalInstruction, agentName, options);
+  return await UniversalLLM.generate(message, finalInstruction, agentName, { ...options, history });
 };
 
-export const enhanceProjectPrompt = async (currentPrompt: string, projectType: string) => {
+export interface QAQuestion {
+  id: string;
+  text: string;
+  options: string[];
+  allowCustom: boolean;
+}
+
+export const generateDetailedPlan = async (prompt: string, onChunk?: (text: string) => void): Promise<string> => {
+  const systemInstruction = getAgentPersona('Aarav');
   return await UniversalLLM.generate(
-    `Original Input: "${currentPrompt}"\nContext/Type: ${projectType}\nTask: Rewrite for clarity.`, 
-    "You are a Prompt Engineer. rewrite clearly.", 
-    undefined, 
-    { temperature: 0.1 }
+    `User Request: "${prompt}"\n\nCreate a detailed project plan including:\n1. Goal\n2. Features\n3. Tech Stack\n4. Agent Roles\n5. Implementation Steps\n\nFormat as Markdown.`,
+    systemInstruction,
+    'Aarav',
+    { 
+      onChunk,
+      model: 'gemini-3.1-pro-preview'
+    }
   );
+};
+
+export const reviseDetailedPlan = async (currentPlan: string, feedback: string): Promise<string> => {
+  const systemInstruction = getAgentPersona('Aarav');
+  return await UniversalLLM.generate(
+    `Current Plan:\n${currentPlan}\n\nUser Feedback: "${feedback}"\n\nRevise the plan to incorporate the feedback. Return the full updated plan in Markdown.`,
+    systemInstruction,
+    'Aarav'
+  );
+};
+
+export const generatePujaQuestions = async (plan: string): Promise<QAQuestion[]> => {
+  const systemInstruction = getAgentPersona('Puja');
+  const schema = {
+    type: Type.ARRAY,
+    items: {
+      type: Type.OBJECT,
+      properties: {
+        id: { type: Type.STRING },
+        text: { type: Type.STRING },
+        options: { type: Type.ARRAY, items: { type: Type.STRING } },
+        allowCustom: { type: Type.BOOLEAN }
+      },
+      required: ['id', 'text', 'options', 'allowCustom']
+    }
+  };
+  
+  return await generateJSON(
+    `Review this plan:\n${plan}\n\nIdentify missing details or decisions needed from the user (e.g., design style, database choice, auth). Generate 3-5 clarifying questions.`,
+    systemInstruction,
+    schema,
+    { temperature: 0.7 }
+  ) || [];
+};
+
+export const generateArchitectureManifest = async (plan: string, qaAnswers: Record<string, string>): Promise<{path: string, type: 'file'|'folder', content?: string}[]> => {
+  const systemInstruction = getAgentPersona('Rohit');
+  const prompt = `Based on the plan and user answers, generate a complete file structure manifest.\nPlan:\n${plan}\n\nUser Answers:\n${JSON.stringify(qaAnswers)}\n\nReturn a JSON array of objects: { "path": "src/index.ts", "type": "file", "content": "// content" }. For files, provide a minimal skeleton/comment content.`;
+  
+  const schema = {
+    type: Type.ARRAY,
+    items: {
+      type: Type.OBJECT,
+      properties: {
+        path: { type: Type.STRING },
+        type: { type: Type.STRING, enum: ['file', 'folder'] },
+        content: { type: Type.STRING }
+      },
+      required: ['path', 'type']
+    }
+  };
+
+  return await generateJSON(prompt, systemInstruction, schema) || [];
 };

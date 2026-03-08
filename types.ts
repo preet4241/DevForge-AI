@@ -1,4 +1,20 @@
 
+export type MemoryType = 'rule' | 'pattern' | 'anti-pattern' | 'critique' | 'scenario' | 'debate_outcome';
+
+export interface MemoryItem {
+  id: string;
+  type: MemoryType;
+  content: string;
+  domain?: string; 
+  timestamp: number;
+  useCount: number;
+  source?: string;
+  embedding?: number[]; // Vector embedding for RAG
+  // New fields for advanced training data
+  scenarioContext?: string; // For 'scenario' type: The situation description
+  critiqueTarget?: string; // For 'critique' type: What was critiqued (e.g., "auth_flow")
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -48,7 +64,7 @@ export interface ProjectState {
   } | null;
 }
 
-export type ActivityLogType = 'working' | 'created' | 'editing' | 'edited' | 'reading' | 'running' | 'done' | 'error' | 'thinking' | 'waiting';
+export type ActivityLogType = 'working' | 'created' | 'editing' | 'edited' | 'reading' | 'running' | 'done' | 'error' | 'thinking' | 'waiting' | 'success';
 
 export interface ActivityLogEntry {
   id: string;

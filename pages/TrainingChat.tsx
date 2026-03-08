@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 import { Button, Badge } from '../components/UI';
 import { LearningService } from '../services/learningService';
-import { GlobalMemoryController, MemoryItem, LearningLog } from '../services/memoryService';
+import { GlobalMemoryController, LearningLog } from '../services/memoryService';
+import { MemoryItem } from '../types';
 import { Markdown } from '../components/Markdown';
 import { useToast } from '../components/Toast'; // Added Toast for error handling
 

@@ -1,22 +1,8 @@
 
-import { getEmbedding } from './embeddingService';
-import { algebraDb } from './algebraDb';
-
-export type MemoryType = 'rule' | 'pattern' | 'anti-pattern' | 'critique' | 'scenario' | 'debate_outcome';
-
-export interface MemoryItem {
-  id: string;
-  type: MemoryType;
-  content: string;
-  domain?: string; 
-  timestamp: number;
-  useCount: number;
-  source?: string;
-  embedding?: number[]; // Vector embedding for RAG
-  // New fields for advanced training data
-  scenarioContext?: string; // For 'scenario' type: The situation description
-  critiqueTarget?: string; // For 'critique' type: What was critiqued (e.g., "auth_flow")
-}
+import { MemoryItem, MemoryType } from '../types';
+import { getEmbedding } from './geminiService';
+import { db } from './firebase';
+import { collection, getDocs, addDoc, query, where, doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 export interface LearningLog {
   id: string;
@@ -179,21 +165,35 @@ export class MemoryController {
       });
     }
 
-    // 2. Load Content from AlgebraDB
+    // 2. Load Content from Firestore
     try {
-      await algebraDb.initialize();
-      const vectorData = await algebraDb.getAllMemories();
+      const memoriesRef = collection(db, 'agent_memories');
+      const snapshot = await getDocs(memoriesRef);
       
-      Object.keys(vectorData).forEach(agentId => {
-        if (!this.memoryCache[agentId]) this.memoryCache[agentId] = createEmptyMemory(agentId);
-        const items = vectorData[agentId];
+      snapshot.forEach(doc => {
+        const data = doc.data() as MemoryItem & { agentId: string };
+        const agentId = data.agentId;
         
-        this.memoryCache[agentId].rules = items.filter(i => i.type === 'rule');
-        this.memoryCache[agentId].patterns = items.filter(i => i.type === 'pattern');
-        this.memoryCache[agentId].antiPatterns = items.filter(i => i.type === 'anti-pattern');
+        if (agentId && this.memoryCache[agentId]) {
+          const item: MemoryItem = {
+            id: doc.id,
+            type: data.type,
+            content: data.content,
+            timestamp: data.timestamp,
+            useCount: data.useCount,
+            embedding: data.embedding,
+            domain: data.domain,
+            scenarioContext: data.scenarioContext,
+            critiqueTarget: data.critiqueTarget
+          };
+
+          if (item.type === 'rule') this.memoryCache[agentId].rules.push(item);
+          else if (item.type === 'pattern') this.memoryCache[agentId].patterns.push(item);
+          else if (item.type === 'anti-pattern') this.memoryCache[agentId].antiPatterns.push(item);
+        }
       });
     } catch (e) {
-      console.error("Failed to load vector memory from AlgebraDB", e);
+      console.error("Failed to load vector memory from Firestore", e);
     }
 
     this.initialized = true;
@@ -224,7 +224,20 @@ export class MemoryController {
     mem.patterns = [];
     mem.antiPatterns = [];
     
-    await algebraDb.clearAgentMemory(agentId);
+    // Delete from Firestore
+    try {
+      const memoriesRef = collection(db, 'agent_memories');
+      const q = query(memoriesRef, where('agentId', '==', agentId));
+      const snapshot = await getDocs(q);
+      
+      const batch = writeBatch(db);
+      snapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+    } catch (e) {
+      console.error("Failed to clear memory from Firestore", e);
+    }
 
     // Don't clear stats
     this.saveStats();
@@ -280,13 +293,23 @@ export class MemoryController {
     const queryEmbedding = await getEmbedding(query);
     if (!queryEmbedding) return []; // Fallback if embedding fails
 
-    // 2. Search using AlgebraDB (Orama Vector Search)
-    try {
-      return await algebraDb.searchMemory(agentId, queryEmbedding, topK);
-    } catch (e) {
-      console.error("AlgebraDB search failed, falling back to basic search", e);
-      return [];
-    }
+    // 2. Search using In-Memory Cache (loaded from Firestore)
+    const mem = this.getAgentMemory(agentId);
+    const allItems = [...mem.rules, ...mem.patterns, ...mem.antiPatterns];
+    
+    const scoredItems = allItems.map(item => {
+      if (!item.embedding || item.embedding.length === 0) return { ...item, similarity: 0 };
+      return {
+        ...item,
+        similarity: cosineSimilarity(queryEmbedding, item.embedding)
+      };
+    });
+
+    // Filter by threshold and sort
+    return scoredItems
+      .filter(item => item.similarity > 0.65) // Threshold
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, topK);
   }
 
   static addExperience(agentId: string, amount: number, skillsUsed: string[]) {
@@ -346,15 +369,22 @@ export class MemoryController {
       embedding: embedding || []
     };
 
-    // 2. Save to AlgebraDB
+    // 2. Save to Firestore
+    try {
+      await addDoc(collection(db, 'agent_memories'), {
+        ...newItem,
+        agentId
+      });
+    } catch (e) {
+      console.error("Failed to save memory to Firestore", e);
+    }
+
+    // 3. Update In-Memory Cache for UI
     const mem = this.getAgentMemory(agentId);
     
     // Check duplicates in cache
     const allItems = [...mem.rules, ...mem.patterns, ...mem.antiPatterns];
     if (!allItems.some(i => i.content === newItem.content)) {
-        await algebraDb.insertMemory(agentId, newItem);
-
-        // 3. Update In-Memory Cache for UI
         if (type === 'rule') mem.rules.unshift(newItem);
         else if (type === 'pattern') mem.patterns.unshift(newItem);
         else mem.antiPatterns.unshift(newItem);

@@ -1,10 +1,10 @@
 
 import React, { lazy } from 'react';
-console.log('DEBUG: App.tsx React:', React);
 import { Routes, Route, HashRouter } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
+import { IDEProvider } from './contexts/IDEContext';
 
 // Helper for stability: Retries lazy imports with exponential backoff for smoother recovery
 const retry = (fn: () => Promise<any>, retriesLeft = 5, interval = 500): Promise<any> => {
@@ -42,24 +42,26 @@ function App() {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <HashRouter>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/build" element={<Builder />} />
-              <Route path="/logic" element={<LogicBuilder />} />
-              <Route path="/templates" element={<Templates />} />
-              <Route path="/projects" element={<Projects />} />
-              <Route path="/planning" element={<Planning />} />
-              <Route path="/chat" element={<Chat />} />
-              <Route path="/code" element={<CodeGenerator />} />
-              <Route path="/agents" element={<AgentDashboard />} />
-              <Route path="/training" element={<TrainingChat />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/terminal" element={<TerminalPage />} />
-            </Routes>
-          </Layout>
-        </HashRouter>
+        <IDEProvider>
+          <HashRouter>
+            <Layout>
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/build" element={<Builder />} />
+                <Route path="/logic" element={<LogicBuilder />} />
+                <Route path="/templates" element={<Templates />} />
+                <Route path="/projects" element={<Projects />} />
+                <Route path="/planning" element={<Planning />} />
+                <Route path="/chat" element={<Chat />} />
+                <Route path="/code" element={<CodeGenerator />} />
+                <Route path="/agents" element={<AgentDashboard />} />
+                <Route path="/training" element={<TrainingChat />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/terminal" element={<TerminalPage />} />
+              </Routes>
+            </Layout>
+          </HashRouter>
+        </IDEProvider>
       </ToastProvider>
     </ErrorBoundary>
   );

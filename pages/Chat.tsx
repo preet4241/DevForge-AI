@@ -4,11 +4,11 @@ import {
   Bot, ChevronLeft, Wrench, MessageSquare, Monitor, Terminal, Paperclip, X, FileCode, 
   ArrowUp, Activity, MoreVertical, Rocket, Zap, Globe, Download, Code, Maximize2, Minimize2, Copy, Check,
   Ghost, MessageCircleWarning, Trash2, BookOpen, Sparkles, Book, BrainCircuit, Save,
-  Play, Square, MessageCircle, ClipboardList, Smartphone, Tablet
+  Play, Square, MessageCircle, ClipboardList, Smartphone, Tablet, Settings, Loader2
 } from 'lucide-react';
 import { Button, Badge, Tooltip } from '../components/UI';
 import { Orchestrator } from '../services/orchestrator';
-import { generateShadowCritique } from '../services/geminiService';
+import { generateShadowCritique, scaffoldProject, generateDetailedPlan, reviseDetailedPlan, generatePujaQuestions, generateArchitectureManifest, QAQuestion } from '../services/geminiService';
 import { LearningService, DiaryEntry } from '../services/learningService';
 import { MemoryController } from '../services/memoryService';
 import { StorageService } from '../services/storageService';
@@ -17,6 +17,9 @@ import { Markdown } from '../components/Markdown';
 import { ActivityLogPanel } from '../components/ActivityLogPanel';
 import { ActivityLogEntry } from '../types';
 import { useToast } from '../components/Toast';
+import { runGraph } from '../services/langgraph/graphs';
+import { useIDE } from '../contexts/IDEContext';
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
 
 interface Message {
   id: string;
@@ -60,10 +63,12 @@ const SAMPLE_LOGS = [
 const Chat = () => {
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { state: ideState, dispatch: ideDispatch } = useIDE();
   const [project, setProject] = useState<any>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedGraphStyle, setSelectedGraphStyle] = useState<"Basic" | "CrewAI" | "AutoGen" | "AutoGPT">("Basic");
   
   // Artifacts
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -93,7 +98,23 @@ const Chat = () => {
   const [showActivityLog, setShowActivityLog] = useState(false);
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
   const [currentStatus, setCurrentStatus] = useState<{agent: string, status: string} | null>(null);
+  const [showGraphMenu, setShowGraphMenu] = useState(false);
   
+  // Workflow State
+  const [workflowStage, setWorkflowStage] = useState<'idle' | 'analyzing' | 'plan_review' | 'qa' | 'executing'>('idle');
+  const [generatedPlan, setGeneratedPlan] = useState<string>('');
+  const [qaQuestions, setQaQuestions] = useState<QAQuestion[]>([]);
+  const [qaAnswers, setQaAnswers] = useState<Record<string, string>>({});
+  const [isPlanEditing, setIsPlanEditing] = useState(false);
+  const [planEditFeedback, setPlanEditFeedback] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [pendingPrompt, setPendingPrompt] = useState('');
+  
+  // Aarav Thinking State
+  const [thinkingLogs, setThinkingLogs] = useState<string[]>([]);
+  const [currentThinkingText, setCurrentThinkingText] = useState('');
+  const thinkingScrollRef = useRef<HTMLDivElement>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -121,6 +142,44 @@ const Chat = () => {
                   timestamp: Date.now()
                 };
                 setMessages([initialUserMsg]);
+                
+                // Scaffold project if no code files exist
+                if (!fullProj.codeFiles || fullProj.codeFiles.length === 0) {
+                  handleAddLog({
+                    agentId: 'SYSTEM',
+                    type: 'working',
+                    text: 'Scaffolding smart folder structure...',
+                    editable: false,
+                    done: false
+                  });
+                  const structure = await scaffoldProject(fullProj.description);
+                  if (structure && structure.length > 0) {
+                    fullProj.codeFiles = structure
+                      .filter(s => s.type === 'file')
+                      .map(s => ({
+                        name: s.path,
+                        language: s.path.split('.').pop() || 'plaintext',
+                        content: s.content || ''
+                      }));
+                    await StorageService.saveProject(fullProj);
+                    setProject(fullProj);
+                    localStorage.setItem('currentProject', JSON.stringify(fullProj));
+                    
+                    // Sync with IDE context
+                    structure.forEach(s => {
+                      ideDispatch({ type: 'CREATE_NODE', payload: { path: s.path, type: s.type, content: s.content || '' } });
+                    });
+                    
+                    handleAddLog({
+                      agentId: 'SYSTEM',
+                      type: 'working',
+                      text: `Scaffolded ${structure.length} files/folders.`,
+                      editable: false,
+                      done: true
+                    });
+                  }
+                }
+
                 processOrchestratedMessage(initialUserMsg.text, []);
               } else {
                 setMessages([{
@@ -194,42 +253,169 @@ const Chat = () => {
     const signal = abortControllerRef.current.signal;
 
     try {
-      await Orchestrator.handleUserMessage(
-        text, 
-        history, 
-        (agent, status) => {
-          setCurrentStatus({ agent, status });
-          handleAddLog({
-            agentId: agent,
-            type: 'working',
-            text: status,
-            editable: false,
-            done: false
-          });
-        },
-        (agentName, rawText) => {
-          const { cleanText, foundArtifacts } = extractArtifactsFromText(rawText, agentName);
-          
-          if (foundArtifacts.length > 0) {
-             setArtifacts(prev => [...prev, ...foundArtifacts]);
-             setActiveArtifactId(foundArtifacts[0].id);
-             setShowArtifacts(true);
-          }
-
-          const msgId = Date.now().toString() + Math.random();
-          const newMsg: Message = {
-            id: msgId,
-            role: 'model',
-            text: cleanText,
-            timestamp: Date.now(),
-            agentName: agentName,
-            isStreaming: true 
-          };
-
-          setMessages(prev => [...prev, newMsg]);
-        },
-        signal
+      const langChainHistory = history.map(m => 
+        m.role === 'user' ? new HumanMessage({ content: m.text }) : new AIMessage({ content: m.text, name: m.agentName })
       );
+
+      const fileOperations = {
+        createFile: async (path: string, content: string) => {
+          ideDispatch({ type: 'CREATE_NODE', payload: { path, type: 'file', content } });
+          // Sync with Firebase
+          if (project) {
+            const updatedProject = { ...project };
+            if (!updatedProject.codeFiles) updatedProject.codeFiles = [];
+            updatedProject.codeFiles.push({ name: path, content, type: 'file' });
+            await StorageService.saveProject(updatedProject);
+            setProject(updatedProject);
+            localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+          }
+          // Sync with local disk
+          try {
+            await fetch('/api/workspace/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'create', path, content })
+            });
+          } catch (e) {
+            console.error("Local sync failed", e);
+          }
+        },
+        editFile: async (path: string, content: string) => {
+          ideDispatch({ type: 'UPDATE_CONTENT', payload: { path, content } });
+          // Sync with Firebase
+          if (project) {
+            const updatedProject = { ...project };
+            if (!updatedProject.codeFiles) updatedProject.codeFiles = [];
+            const fileIdx = updatedProject.codeFiles.findIndex((f: any) => f.name === path);
+            if (fileIdx > -1) {
+              updatedProject.codeFiles[fileIdx].content = content;
+            } else {
+              updatedProject.codeFiles.push({ name: path, content, type: 'file' });
+            }
+            await StorageService.saveProject(updatedProject);
+            setProject(updatedProject);
+            localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+          }
+          // Sync with local disk
+          try {
+            await fetch('/api/workspace/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'edit', path, content })
+            });
+          } catch (e) {
+            console.error("Local sync failed", e);
+          }
+        },
+        deleteFile: async (path: string) => {
+          ideDispatch({ type: 'DELETE_NODE', payload: path });
+          // Sync with Firebase
+          if (project) {
+            const updatedProject = { ...project };
+            if (updatedProject.codeFiles) {
+              updatedProject.codeFiles = updatedProject.codeFiles.filter((f: any) => f.name !== path && !f.name.startsWith(path + '/'));
+              await StorageService.saveProject(updatedProject);
+              setProject(updatedProject);
+              localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+            }
+          }
+          // Sync with local disk
+          try {
+            await fetch('/api/workspace/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'delete', path })
+            });
+          } catch (e) {
+            console.error("Local sync failed", e);
+          }
+        },
+        renameFile: async (oldPath: string, newPath: string) => {
+          ideDispatch({ type: 'RENAME_NODE', payload: { oldPath, newPath } });
+          // Sync with Firebase
+          if (project) {
+            const updatedProject = { ...project };
+            if (updatedProject.codeFiles) {
+              updatedProject.codeFiles = updatedProject.codeFiles.map((f: any) => {
+                if (f.name === oldPath) return { ...f, name: newPath };
+                if (f.name.startsWith(oldPath + '/')) return { ...f, name: f.name.replace(oldPath, newPath) };
+                return f;
+              });
+              await StorageService.saveProject(updatedProject);
+              setProject(updatedProject);
+              localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+            }
+          }
+          // Sync with local disk
+          try {
+            await fetch('/api/workspace/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'rename', oldPath, newPath })
+            });
+          } catch (e) {
+            console.error("Local sync failed", e);
+          }
+        }
+      };
+
+      await runGraph(
+        selectedGraphStyle,
+        text,
+        langChainHistory,
+        {
+          onNodeStart: (nodeName) => {
+            setCurrentStatus({ agent: nodeName, status: `Agent ${nodeName} is thinking...` });
+            handleAddLog({
+              agentId: nodeName,
+              type: 'working',
+              text: `Agent ${nodeName} started working`,
+              editable: false,
+              done: false
+            });
+          },
+          onNodeEnd: (nodeName, output) => {
+            handleAddLog({
+              agentId: nodeName,
+              type: 'working',
+              text: `Agent ${nodeName} finished working`,
+              editable: false,
+              done: true
+            });
+
+            const { cleanText, foundArtifacts } = extractArtifactsFromText(output, nodeName);
+            
+            if (foundArtifacts.length > 0) {
+              setArtifacts(prev => [...prev, ...foundArtifacts]);
+              setActiveArtifactId(foundArtifacts[0].id);
+              setShowArtifacts(true);
+            }
+
+            const msgId = Date.now().toString() + Math.random();
+            const newMsg: Message = {
+              id: msgId,
+              role: 'model',
+              text: cleanText,
+              timestamp: Date.now(),
+              agentName: nodeName,
+              isStreaming: false 
+            };
+
+            setMessages(prev => [...prev, newMsg]);
+          },
+          onToolCall: (toolName, output) => {
+            handleAddLog({
+              agentId: toolName,
+              type: 'working',
+              text: output,
+              editable: false,
+              done: true
+            });
+          }
+        },
+        fileOperations
+      );
+
     } catch (e: any) {
       if (e.message !== "Process stopped by user.") {
         showToast("Agent process failed", "error");
@@ -240,22 +426,238 @@ const Chat = () => {
     }
   };
 
-  const handleSendMessage = () => {
-    if (!inputValue.trim() || isLoading) return;
-    const text = inputValue;
-    setInputValue('');
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', text, timestamp: Date.now() };
-    setMessages(prev => [...prev, userMsg]);
-    processOrchestratedMessage(text, [...messages, userMsg]);
-  };
-
   const handleAddLog = (log: Omit<ActivityLogEntry, 'id' | 'timestamp'>) => {
     const newLog: ActivityLogEntry = {
       ...log,
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       timestamp: Date.now()
     };
-    setActivityLogs(prev => [...prev, newLog]);
+    setActivityLogs(prev => [newLog, ...prev]);
+    if (log.type === 'working' && !log.done) {
+      setCurrentStatus({ agent: log.agentId, status: log.text });
+    } else if (log.done) {
+      setCurrentStatus(null);
+    }
+  };
+
+  const startAnalysis = async (prompt: string) => {
+    setPendingPrompt(prompt);
+    
+    // Add user message immediately
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: prompt,
+      timestamp: Date.now()
+    };
+    setMessages(prev => [...prev, userMsg]);
+    
+    setWorkflowStage('analyzing');
+    setIsModalOpen(false); // Keep modal closed during thinking
+    setThinkingLogs(["Initializing Aarav..."]);
+    setCurrentThinkingText('');
+    
+    try {
+      // 180s timeout for plan generation (increased from 60s)
+      const timeoutPromise = new Promise<string>((_, reject) => 
+        setTimeout(() => reject(new Error("Analysis timed out")), 180000)
+      );
+
+      const plan = await Promise.race([
+        generateDetailedPlan(prompt, (text) => {
+          setCurrentThinkingText(prev => {
+            const newText = prev + text;
+            if (newText.includes('\n')) {
+              const lines = newText.split('\n');
+              const completeLines = lines.slice(0, -1);
+              const incompleteLine = lines[lines.length - 1];
+              
+              setThinkingLogs(logs => [...logs, ...completeLines.filter(l => l.trim())]);
+              return incompleteLine;
+            }
+            return newText;
+          });
+        }),
+        timeoutPromise
+      ]);
+      
+      setGeneratedPlan(plan);
+      setWorkflowStage('plan_review');
+      setIsModalOpen(true); // Open modal only when plan is ready
+    } catch (error) {
+      console.error("Analysis failed:", error);
+      showToast("Failed to generate plan. Please try again.", "error");
+      
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'model',
+        text: "⚠️ **Aarav Error:** Failed to generate project plan. Please try again.",
+        timestamp: Date.now(),
+        agentName: 'Aarav'
+      }]);
+      
+      setWorkflowStage('idle');
+    }
+  };
+
+  const handlePlanEdit = async (feedback: string) => {
+    if (!feedback.trim()) return;
+    setIsLoading(true);
+    try {
+      const revised = await reviseDetailedPlan(generatedPlan, feedback);
+      setGeneratedPlan(revised);
+      setIsPlanEditing(false);
+      setPlanEditFeedback('');
+    } catch (error) {
+      showToast("Failed to revise plan.", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePlanApprove = async () => {
+    setIsLoading(true);
+    try {
+      const questions = await generatePujaQuestions(generatedPlan);
+      setQaQuestions(questions);
+      setWorkflowStage('qa');
+    } catch (error) {
+      showToast("Failed to generate questions.", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStartBuilding = async () => {
+    setIsModalOpen(false);
+    setWorkflowStage('executing');
+    
+    // Add user message to chat
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: pendingPrompt,
+      timestamp: Date.now()
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setIsLoading(true);
+
+    try {
+      // Step 4a: Architecture Agent
+      handleAddLog({
+        agentId: 'Architecture',
+        type: 'working',
+        text: 'Creating project structure...',
+        editable: false,
+        done: false
+      });
+
+      const structure = await generateArchitectureManifest(generatedPlan, qaAnswers);
+      
+      // Execute file creation
+      for (const item of structure) {
+        ideDispatch({
+          type: 'CREATE_NODE',
+          payload: { path: item.path, type: item.type, content: item.content }
+        });
+      }
+
+      handleAddLog({
+        agentId: 'Architecture',
+        type: 'success',
+        text: 'Project structure scaffolded.',
+        editable: false,
+        done: true
+      });
+
+      // Step 4b: Run Graph
+      const fullPrompt = `
+Original Request: ${pendingPrompt}
+
+Approved Plan:
+${generatedPlan}
+
+User Preferences (Q&A):
+${JSON.stringify(qaAnswers, null, 2)}
+
+Project structure has been scaffolded. Now implement the code for these files.
+      `.trim();
+
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
+      // Convert messages for LangChain
+      const history = messages.map(m => 
+        m.role === 'user' ? new HumanMessage(m.text) : new AIMessage(m.text)
+      );
+
+      // Stream response
+      const msgId = Date.now().toString();
+      setMessages(prev => [...prev, {
+        id: msgId,
+        role: 'model',
+        text: '',
+        timestamp: Date.now(),
+        isStreaming: true
+      }]);
+
+      const finalResponse = await runGraph(
+        selectedGraphStyle, 
+        fullPrompt, 
+        history, 
+        {
+            onNodeStart: (node) => handleAddLog({ agentId: node, type: 'working', text: `${node} started...`, done: false, editable: false }),
+            onNodeEnd: (node, output) => {
+                handleAddLog({ agentId: node, type: 'success', text: `Completed step.`, done: true, editable: false });
+                setMessages(prev => prev.map(m => 
+                    m.id === msgId ? { ...m, text: (m.text || '') + `\n\n**${node}:**\n${output}` } : m
+                ));
+            },
+            onToolCall: (tool, output) => handleAddLog({ agentId: tool, type: 'working', text: `Tool used: ${output}`, done: false, editable: false })
+        },
+        undefined,
+        abortController.signal
+      );
+
+      setMessages(prev => prev.map(m => 
+        m.id === msgId ? { ...m, isStreaming: false } : m
+      ));
+
+      // Post-run logic (Shadow, etc.)
+      setIsShadowThinking(true);
+      const critique = await generateShadowCritique(finalResponse);
+      if (critique && critique.critique) {
+        setWhispers(prev => [{
+          id: Date.now().toString(),
+          critique: critique.critique,
+          severity: critique.severity,
+          timestamp: Date.now()
+        }, ...prev]);
+        setShowWhisperModal(true);
+      }
+      setIsShadowThinking(false);
+
+    } catch (error: any) {
+      if (error.message === 'Process stopped by user.') {
+        showToast('Execution stopped.', 'info');
+      } else {
+        console.error("Execution failed:", error);
+        showToast("Execution failed. See console.", "error");
+      }
+    } finally {
+      setIsLoading(false);
+      setWorkflowStage('idle');
+      setPendingPrompt('');
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isLoading) return;
+    
+    // Start the workflow instead of direct execution
+    await startAnalysis(inputValue);
+    setInputValue('');
   };
 
   useEffect(() => {
@@ -265,57 +667,110 @@ const Chat = () => {
   // Derive activeArtifact from the artifacts array using activeArtifactId
   const activeArtifact = artifacts.find(art => art.id === activeArtifactId);
 
+  // Aarav Thinking Effect
+  useEffect(() => {
+    if (workflowStage !== 'analyzing') {
+      setThinkingLogs([]);
+      setCurrentThinkingText('');
+      return;
+    }
+  }, [workflowStage]);
+
+  // Auto-scroll thinking logs
+  useEffect(() => {
+    if (thinkingScrollRef.current) {
+      thinkingScrollRef.current.scrollTop = thinkingScrollRef.current.scrollHeight;
+    }
+  }, [thinkingLogs, currentThinkingText]);
+
   return (
     <div className="flex flex-col h-screen bg-zinc-950 text-zinc-200 overflow-hidden font-inter relative">
       {/* HEADER */}
-      <header className="h-14 border-b border-zinc-900 flex items-center justify-between px-3 md:px-4 bg-zinc-950 shrink-0 z-20">
-        <div className="flex items-center gap-2 md:gap-3 overflow-hidden">
+      <header className="h-14 border-b border-zinc-900 flex items-center justify-between px-3 bg-zinc-950 shrink-0 z-20 gap-2">
+        {/* LEFT: Back & Project Info */}
+        <div className="flex items-center gap-2 min-w-0 shrink-1">
           <button 
             onClick={() => navigate('/projects')} 
-            className="p-1.5 md:p-2 text-zinc-400 hover:text-white transition-colors rounded-lg focus:ring-2 focus:ring-orange-500 shrink-0"
+            className="p-1.5 text-zinc-400 hover:text-white transition-colors rounded-lg hover:bg-zinc-900 shrink-0"
           >
-            <ChevronLeft size={20} className="md:w-6 md:h-6" />
+            <ChevronLeft size={18} />
           </button>
           <div className="flex flex-col min-w-0">
-             <h1 className="text-sm font-bold text-zinc-100 truncate pr-2">{project?.name || 'Untitled Project'}</h1>
-             <span className="text-[10px] text-green-500 flex items-center gap-1">
-                <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse"></span> Agent Cluster Online
+             <h1 className="text-xs md:text-sm font-bold text-zinc-100 truncate">{project?.name || 'Untitled'}</h1>
+             <span className="text-[9px] md:text-[10px] text-green-500 flex items-center gap-1">
+                <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse"></span> 
+                Online
              </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 md:gap-3">
+        {/* RIGHT: Tools & Graph Selector */}
+        <div className="flex items-center gap-1 shrink-0">
+           {/* Graph Selector Dropdown */}
+           <div className="relative">
+             <button
+               onClick={() => setShowGraphMenu(!showGraphMenu)}
+               className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 text-[10px] md:text-xs font-medium rounded-lg px-2 py-1.5 transition-all"
+             >
+               <span className="truncate max-w-[80px] md:max-w-none">{selectedGraphStyle}</span>
+               <ChevronLeft size={10} className={`text-zinc-500 transition-transform ${showGraphMenu ? 'rotate-90' : '-rotate-90'}`} />
+             </button>
+             
+             {showGraphMenu && (
+               <>
+                 <div className="fixed inset-0 z-30" onClick={() => setShowGraphMenu(false)} />
+                 <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl z-40 overflow-hidden animate-fade-in">
+                   {(["Basic", "CrewAI", "AutoGen", "AutoGPT"] as const).map((style) => (
+                     <button
+                       key={style}
+                       onClick={() => {
+                         setSelectedGraphStyle(style);
+                         setShowGraphMenu(false);
+                       }}
+                       className={`w-full text-left px-3 py-2 text-xs hover:bg-zinc-800 transition-colors flex items-center justify-between ${selectedGraphStyle === style ? 'text-orange-500 bg-zinc-800/50' : 'text-zinc-400'}`}
+                     >
+                       {style}
+                       {selectedGraphStyle === style && <Check size={12} />}
+                     </button>
+                   ))}
+                 </div>
+               </>
+             )}
+           </div>
+
+           <div className="h-4 w-px bg-zinc-900 mx-1"></div>
+
            <Tooltip content="Whispers">
              <button 
                onClick={() => setShowWhispers(!showWhispers)}
-               className={`p-2 rounded-lg transition-colors ${showWhispers ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/20' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
+               className={`p-1.5 rounded-lg transition-all ${showWhispers ? 'bg-orange-500/10 text-orange-500' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
              >
-               <MessageCircle size={20} />
+               <MessageCircle size={16} />
              </button>
            </Tooltip>
            <Tooltip content="Tasks">
              <button 
                onClick={() => setShowTasks(!showTasks)}
-               className={`p-2 rounded-lg transition-colors ${showTasks ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/20' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
+               className={`p-1.5 rounded-lg transition-all ${showTasks ? 'bg-orange-500/10 text-orange-500' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
              >
-               <ClipboardList size={20} />
+               <ClipboardList size={16} />
              </button>
            </Tooltip>
-           <Tooltip content="Manage Artifacts">
+           <Tooltip content="Artifacts">
              <button 
                onClick={() => setShowArtifacts(!showArtifacts)}
-               className={`p-2 rounded-lg transition-colors ${showArtifacts ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/20' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
+               className={`p-1.5 rounded-lg transition-all ${showArtifacts ? 'bg-orange-500/10 text-orange-500' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900'}`}
              >
-               <FileCode size={20} />
+               <FileCode size={16} />
              </button>
            </Tooltip>
+
            <button 
              onClick={() => navigate('/code')}
-             className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+             className="hidden sm:flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 px-2 py-1.5 rounded-lg text-[10px] md:text-xs font-bold transition-all ml-1"
            >
-              <Terminal size={14} className="text-orange-500" />
-              <span className="hidden sm:inline">Full IDE</span>
-              <span className="sm:hidden">IDE</span>
+              <Terminal size={12} className="text-orange-500" />
+              <span>IDE</span>
            </button>
         </div>
       </header>
@@ -325,109 +780,161 @@ const Chat = () => {
         {/* CHAT AREA */}
         <div className="flex-1 flex flex-col min-w-0 bg-zinc-950 relative">
           {viewMode === 'chat' ? (
-            <div className="flex-1 overflow-y-auto custom-scrollbar px-3 md:px-6 py-4 md:py-8 space-y-6 md:space-y-8">
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-8 py-6 space-y-6">
               {messages.map((msg, i) => (
-                <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in`}>
+                <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-fade-in group`}>
                   {msg.role === 'model' && (
-                    <div className="flex items-center gap-2 mb-2 px-1">
-                      <div className="w-6 h-6 rounded-full bg-orange-600 flex items-center justify-center text-[10px] font-black text-white border border-orange-400/30">
+                    <div className="flex items-center gap-2 mb-1.5 px-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                      <div className="w-5 h-5 rounded-md bg-gradient-to-br from-orange-600 to-orange-700 flex items-center justify-center text-[10px] font-black text-white shadow-sm">
                          {msg.agentName?.[0] || 'A'}
                       </div>
-                      <span className="text-xs font-bold text-orange-500 uppercase tracking-widest">{msg.agentName || 'AI Agent'}</span>
+                      <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">{msg.agentName || 'AI Agent'}</span>
                     </div>
                   )}
                   <div className={`
-                    max-w-[92%] sm:max-w-[85%] rounded-2xl p-4 md:p-5 shadow-sm
+                    max-w-[90%] md:max-w-[80%] rounded-2xl p-4 shadow-sm text-sm md:text-base leading-relaxed
                     ${msg.role === 'user' 
-                      ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm border border-zinc-700' 
-                      : 'bg-zinc-900/50 border border-zinc-800 text-zinc-300 rounded-tl-sm'}
+                      ? 'bg-zinc-800 text-zinc-100 rounded-tr-sm border border-zinc-700/50' 
+                      : 'bg-zinc-900/40 border border-zinc-800/50 text-zinc-300 rounded-tl-sm'}
                   `}>
                     <Markdown text={msg.text} />
                   </div>
                 </div>
               ))}
               
+              {/* AARAV THINKING STREAM (Inline) */}
+              {workflowStage === 'analyzing' && (
+                <div className="flex flex-col items-start animate-fade-in group w-full max-w-[90%] md:max-w-[80%]">
+                   <div className="flex items-center gap-2 mb-1.5 px-1 opacity-80">
+                      <div className="w-5 h-5 rounded-md bg-blue-600 flex items-center justify-center text-[10px] font-black text-white shadow-sm">
+                         A
+                      </div>
+                      <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">Aarav</span>
+                   </div>
+                   <div className="bg-zinc-900/40 border border-zinc-800/50 text-zinc-300 rounded-2xl rounded-tl-sm p-0 overflow-hidden w-full">
+                      <div className="flex items-center gap-2 p-3 border-b border-zinc-800/50 bg-zinc-900/50">
+                         <Loader2 size={14} className="animate-spin text-blue-500" />
+                         <span className="text-xs font-mono text-blue-400 uppercase tracking-wider">Process Stream</span>
+                      </div>
+                      <div className="p-4 space-y-2 font-mono text-xs max-h-[300px] overflow-y-auto custom-scrollbar" ref={thinkingScrollRef}>
+                        {thinkingLogs.map((log, i) => (
+                          <div key={i} className="text-zinc-500 flex items-start gap-2 animate-fade-in">
+                            <Check size={12} className="text-green-500 mt-0.5 shrink-0" />
+                            <span>{log}</span>
+                          </div>
+                        ))}
+                        <div className="text-zinc-300 flex items-start gap-2">
+                           <span className="text-blue-500 mt-0.5 shrink-0">➜</span>
+                           <span>
+                             {currentThinkingText}
+                             <span className="w-1.5 h-3 bg-blue-500 animate-pulse inline-block ml-1 align-middle"/>
+                           </span>
+                        </div>
+                      </div>
+                   </div>
+                </div>
+              )}
+
               {/* AGENT STATUS INDICATOR */}
               {isLoading && currentStatus && (
                 <div className="flex flex-col items-start animate-fade-in">
                    <div className="flex items-center gap-2 mb-2 px-1">
-                      <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700">
+                      <div className="w-5 h-5 rounded-md bg-zinc-800 flex items-center justify-center border border-zinc-700">
                          <Activity size={10} className="text-orange-500 animate-pulse" />
                       </div>
-                      <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{currentStatus.agent}</span>
+                      <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">{currentStatus.agent}</span>
                    </div>
-                   <div className="bg-zinc-900/30 border border-dashed border-zinc-800 rounded-2xl px-5 py-4 flex items-center gap-3">
-                      <div className="w-2 h-2 rounded-full bg-orange-500 animate-ping"></div>
-                      <span className="text-sm italic text-zinc-500">{currentStatus.status}</span>
+                   <div className="bg-zinc-900/30 border border-dashed border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3">
+                      <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping"></div>
+                      <span className="text-xs md:text-sm italic text-zinc-500">{currentStatus.status}</span>
                    </div>
                 </div>
               )}
-              <div ref={messagesEndRef} className="h-10 shrink-0" />
+              <div ref={messagesEndRef} className="h-4 shrink-0" />
             </div>
           ) : (
             <div className="flex-1 overflow-hidden flex flex-col bg-zinc-900/30 animate-fade-in">
               {/* Preview Header with Device Toggles */}
-              <div className="h-12 border-b border-zinc-800/50 flex items-center justify-center gap-2 shrink-0 bg-zinc-950/50">
-                <Tooltip content="Desktop View">
-                  <button 
-                    onClick={() => setPreviewDevice('desktop')}
-                    className={`p-2 rounded-lg transition-all ${previewDevice === 'desktop' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    <Monitor size={18} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Tablet View">
-                  <button 
-                    onClick={() => setPreviewDevice('tablet')}
-                    className={`p-2 rounded-lg transition-all ${previewDevice === 'tablet' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    <Tablet size={18} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Mobile View">
-                  <button 
-                    onClick={() => setPreviewDevice('mobile')}
-                    className={`p-2 rounded-lg transition-all ${previewDevice === 'mobile' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    <Smartphone size={18} />
-                  </button>
-                </Tooltip>
+              <div className="h-12 border-b border-zinc-800/50 flex items-center justify-center gap-2 shrink-0 bg-zinc-950/50 backdrop-blur-sm">
+                <div className="flex bg-zinc-900/50 p-1 rounded-lg border border-zinc-800/50">
+                  <Tooltip content="Desktop View">
+                    <button 
+                      onClick={() => setPreviewDevice('desktop')}
+                      className={`p-1.5 rounded-md transition-all ${previewDevice === 'desktop' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <Monitor size={16} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Tablet View">
+                    <button 
+                      onClick={() => setPreviewDevice('tablet')}
+                      className={`p-1.5 rounded-md transition-all ${previewDevice === 'tablet' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <Tablet size={16} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Mobile View">
+                    <button 
+                      onClick={() => setPreviewDevice('mobile')}
+                      className={`p-1.5 rounded-md transition-all ${previewDevice === 'mobile' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <Smartphone size={16} />
+                    </button>
+                  </Tooltip>
+                </div>
               </div>
+              
               {/* Preview Content */}
               <div className="flex-1 overflow-hidden flex items-center justify-center p-4 md:p-8 bg-zinc-950/30">
                 <div 
-                  className={`bg-white shadow-2xl overflow-hidden transition-all duration-500 flex flex-col border border-zinc-800/50 relative mx-auto ${
-                    previewDevice === 'desktop' ? 'w-full h-full rounded-xl max-w-6xl' : 
-                    previewDevice === 'tablet' ? 'w-full h-full max-w-[768px] max-h-[1024px] rounded-[2rem]' : 
-                    'w-full h-full max-w-[375px] max-h-[812px] rounded-[2.5rem]'
+                  className={`bg-zinc-900 shadow-2xl overflow-hidden transition-all duration-500 flex flex-col border border-zinc-800 relative mx-auto ${
+                    previewDevice === 'desktop' ? 'w-full rounded-xl max-w-6xl h-full max-h-[60vh]' : 
+                    previewDevice === 'tablet' ? 'w-full max-w-[768px] rounded-[2rem] h-full max-h-[50vh]' : 
+                    'w-full max-w-[375px] rounded-[2.5rem] h-full max-h-[40vh]'
                   }`}
                 >
                   {/* Device Notch/Header for Mobile/Tablet */}
                   {previewDevice !== 'desktop' && (
-                    <div className="h-6 w-full bg-zinc-100 flex items-center justify-center shrink-0 border-b border-zinc-200">
-                      <div className="w-16 h-1.5 bg-zinc-300 rounded-full"></div>
+                    <div className="h-6 w-full bg-zinc-950 flex items-center justify-center shrink-0 border-b border-zinc-800">
+                      <div className="w-16 h-1.5 bg-zinc-800 rounded-full"></div>
                     </div>
                   )}
 
-                  <div className="flex-1 w-full h-full flex flex-col items-center justify-center bg-zinc-50 relative overflow-hidden">
-                    {isAppRunning ? (
+                  <div className="flex-1 w-full h-full flex flex-col items-center justify-center bg-zinc-950 relative overflow-hidden">
+                    {!isAppRunning ? (
+                      // STATE 1: App Stopped
                       <div className="w-full h-full flex flex-col items-center justify-center animate-fade-in p-6 text-center">
-                        <Globe size={48} className="text-zinc-300 mb-4 animate-pulse" />
-                        <p className="text-zinc-500 font-medium">App is running</p>
-                        <p className="text-zinc-400 text-sm mt-2">GUI Preview rendered here</p>
-                        <div className="mt-8 p-4 bg-white rounded-xl border border-zinc-200 shadow-sm w-full max-w-sm">
-                          <p className="text-xs text-zinc-500 font-mono">Current View: {previewDevice}</p>
-                          <div className="mt-2 h-2 w-full bg-zinc-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-orange-500 w-full animate-pulse"></div>
-                          </div>
+                        <div className="w-16 h-16 rounded-full bg-zinc-900 flex items-center justify-center mb-4 border border-zinc-800">
+                          <Square size={24} className="text-zinc-500" fill="currentColor" />
                         </div>
+                        <p className="text-zinc-300 font-medium text-lg">App is stopped</p>
+                        <p className="text-zinc-500 text-sm mt-2">Click the run button to start execution</p>
                       </div>
                     ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center animate-fade-in p-6 text-center">
-                        <Play size={48} className="text-zinc-300 mb-4 opacity-50" />
-                        <p className="text-zinc-500 font-medium">App is stopped</p>
-                        <p className="text-zinc-400 text-sm mt-2">Click Run Execution to start</p>
-                      </div>
+                      // App is Running
+                      <>
+                        {['web', 'app'].includes(project?.type || '') ? (
+                          // STATE 3: Running & Preview Available
+                          <iframe 
+                            src={process.env.APP_URL}
+                            className="w-full h-full border-none bg-white"
+                            title="App Preview"
+                          />
+                        ) : (
+                          // STATE 2: Running but No Preview
+                          <div className="w-full h-full flex flex-col items-center justify-center animate-fade-in p-6 text-center relative">
+                            <div className="absolute inset-0 bg-zinc-950/50 z-0"></div>
+                            <div className="relative z-10 flex flex-col items-center">
+                               <div className="w-16 h-16 rounded-full bg-zinc-900 flex items-center justify-center mb-4 border border-zinc-800 relative">
+                                  <div className="absolute inset-0 rounded-full border-2 border-green-500/20 animate-ping"></div>
+                                  <Activity size={24} className="text-green-500 animate-pulse" />
+                               </div>
+                               <p className="text-zinc-300 font-medium text-lg">App is running</p>
+                               <p className="text-zinc-500 text-sm mt-2">Preview not available for this project type</p>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -472,9 +979,9 @@ const Chat = () => {
           )}
 
           {/* INPUT AREA */}
-          <div className="p-3 md:p-6 bg-zinc-950 border-t border-zinc-900/50 shrink-0 z-10">
+          <div className="p-4 bg-zinc-950 border-t border-zinc-900 shrink-0 z-10">
             <div className="max-w-4xl mx-auto flex flex-col gap-3">
-              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden focus-within:border-orange-500/50 focus-within:ring-1 focus-within:ring-orange-500/50 transition-all shadow-xl">
+              <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden focus-within:border-orange-500/50 focus-within:ring-1 focus-within:ring-orange-500/50 transition-all shadow-lg">
                 <textarea
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
@@ -485,61 +992,55 @@ const Chat = () => {
                     }
                   }}
                   placeholder="Ask the swarm to modify, build or explain..."
-                  className="w-full bg-transparent border-none text-zinc-200 placeholder-zinc-600 px-4 py-3 focus:ring-0 resize-none h-14 md:h-20 text-sm"
+                  className="w-full bg-transparent border-none text-zinc-200 placeholder-zinc-600 px-4 py-4 focus:ring-0 resize-none h-20 md:h-24 text-sm md:text-base"
                 />
-                <div className="flex items-center justify-between px-3 py-2 bg-zinc-950/50 border-t border-zinc-800/50 relative">
+                <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/30 border-t border-zinc-800/50">
                   {/* Left side: Attach & Console */}
-                  <div className="flex items-center gap-1 md:gap-2">
+                  <div className="flex items-center gap-2">
                     <Tooltip content="Attach Context">
                       <button 
                         onClick={() => fileInputRef.current?.click()}
-                        className="p-2 text-zinc-500 hover:text-orange-400 hover:bg-orange-500/10 rounded-xl transition-all"
+                        className="p-2 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-all"
                       >
-                        <Paperclip size={20} />
+                        <Paperclip size={18} />
                       </button>
                     </Tooltip>
                     <input type="file" ref={fileInputRef} className="hidden" multiple onChange={(e) => showToast(`Attached ${e.target.files?.length} files.`)} />
                     
-                    <div className="h-4 w-px bg-zinc-800 mx-1"></div>
-
                     <Tooltip content="Toggle System Console">
                       <button 
                         onClick={() => setShowConsole(!showConsole)}
-                        className={`p-2 rounded-xl transition-all ${showConsole ? 'text-orange-400 bg-orange-500/10' : 'text-zinc-500 hover:text-white'}`}
+                        className={`p-2 rounded-lg transition-all ${showConsole ? 'text-orange-400 bg-orange-500/10' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}`}
                       >
-                        <Terminal size={20} />
+                        <Terminal size={18} />
                       </button>
                     </Tooltip>
                   </div>
 
-                  {/* Center: Toggle Button */}
-                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center bg-zinc-900/80 rounded-lg p-1 border border-zinc-800/50 backdrop-blur-sm">
-                    <button
-                      onClick={() => setViewMode('chat')}
-                      className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all duration-300 relative ${viewMode === 'chat' ? 'text-orange-500' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      {viewMode === 'chat' && (
-                        <span className="absolute inset-0 bg-zinc-800 rounded-md shadow-sm -z-10 animate-fade-in"></span>
-                      )}
-                      Chat
-                    </button>
-                    <button
-                      onClick={() => setViewMode('preview')}
-                      className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all duration-300 relative ${viewMode === 'preview' ? 'text-orange-500' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      {viewMode === 'preview' && (
-                        <span className="absolute inset-0 bg-zinc-800 rounded-md shadow-sm -z-10 animate-fade-in"></span>
-                      )}
-                      Preview
-                    </button>
-                  </div>
+                  {/* Right side: Controls & Send */}
+                  <div className="flex items-center gap-3">
+                    {/* View Toggle */}
+                    <div className="flex items-center bg-zinc-950 rounded-lg p-0.5 border border-zinc-800">
+                      <button
+                        onClick={() => setViewMode('chat')}
+                        className={`px-3 py-1.5 text-[10px] md:text-xs font-bold rounded-md transition-all ${viewMode === 'chat' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                        Chat
+                      </button>
+                      <button
+                        onClick={() => setViewMode('preview')}
+                        className={`px-3 py-1.5 text-[10px] md:text-xs font-bold rounded-md transition-all ${viewMode === 'preview' ? 'bg-zinc-800 text-orange-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                        Preview
+                      </button>
+                    </div>
 
-                  {/* Right side: Run & Dispatch */}
-                  <div className="flex items-center gap-2">
+                    <div className="h-5 w-px bg-zinc-800"></div>
+
                     <Tooltip content={isAppRunning ? "Stop Execution" : "Run Execution"}>
                       <button 
                         onClick={() => setIsAppRunning(!isAppRunning)}
-                        className={`p-2 rounded-xl transition-all ${isAppRunning ? 'text-red-400 bg-red-500/10' : 'text-zinc-500 hover:text-green-400'}`}
+                        className={`p-2 rounded-lg transition-all ${isAppRunning ? 'text-red-400 bg-red-500/10 hover:bg-red-500/20' : 'text-zinc-400 hover:text-green-400 hover:bg-zinc-800'}`}
                       >
                         {isAppRunning ? <Square size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
                       </button>
@@ -548,9 +1049,8 @@ const Chat = () => {
                     <Button 
                       onClick={handleSendMessage}
                       disabled={!inputValue.trim() || isLoading}
-                      className="rounded-xl px-4 py-2 h-10 md:px-6 shadow-lg shadow-orange-900/20"
+                      className={`rounded-xl px-4 py-2 h-9 md:h-10 transition-all ${!inputValue.trim() || isLoading ? 'opacity-50 cursor-not-allowed bg-zinc-800 text-zinc-500' : 'bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-900/20 hover:shadow-orange-900/40'}`}
                     >
-                      <span className="hidden sm:inline">Dispatch Swarm</span>
                       <ArrowUp size={18} />
                     </Button>
                   </div>
@@ -680,6 +1180,127 @@ const Chat = () => {
               </div>
               No active tasks in the queue.
             </div>
+          </div>
+        </div>
+      )}
+      {/* WORKFLOW MODAL */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-2xl bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-950/50 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${workflowStage === 'analyzing' ? 'bg-blue-500/20 text-blue-400' : 'bg-orange-500/20 text-orange-400'}`}>
+                  {workflowStage === 'analyzing' ? <Loader2 size={18} className="animate-spin" /> : 
+                   workflowStage === 'qa' ? <MessageCircle size={18} /> :
+                   <FileCode size={18} />}
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+                    {workflowStage === 'analyzing' ? 'Aarav is Thinking...' :
+                     workflowStage === 'plan_review' ? 'Project Plan' :
+                     workflowStage === 'qa' ? 'Clarifying Questions' : 'Ready'}
+                  </h2>
+                  <p className="text-xs text-zinc-500">
+                    {workflowStage === 'analyzing' ? 'Analyzing your request' :
+                     workflowStage === 'plan_review' ? 'Review and approve the plan' :
+                     workflowStage === 'qa' ? 'Puja needs a few details' : ''}
+                  </p>
+                </div>
+              </div>
+              {workflowStage !== 'analyzing' && (
+                <button onClick={() => setIsModalOpen(false)} className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-white transition-colors">
+                  <X size={20} />
+                </button>
+              )}
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+              
+              {workflowStage === 'plan_review' && (
+                <div className="space-y-4">
+                  {isPlanEditing ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-zinc-400 uppercase">Your Feedback</label>
+                        <button onClick={() => setIsPlanEditing(false)} className="text-xs text-zinc-500 hover:text-white">Cancel</button>
+                      </div>
+                      <textarea 
+                        value={planEditFeedback}
+                        onChange={(e) => setPlanEditFeedback(e.target.value)}
+                        placeholder="What should be changed in the plan?"
+                        className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm text-zinc-300 focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/50 transition-all resize-none"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <Button variant="secondary" onClick={() => setIsPlanEditing(false)}>Cancel</Button>
+                        <Button variant="primary" onClick={() => handlePlanEdit(planEditFeedback)} disabled={isLoading}>
+                          {isLoading ? <Loader2 size={14} className="animate-spin" /> : 'Update Plan'}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="prose prose-invert prose-sm max-w-none">
+                      <div className="whitespace-pre-wrap font-mono text-xs text-zinc-300 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/50">
+                        {generatedPlan}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {workflowStage === 'qa' && (
+                <div className="space-y-6">
+                  {qaQuestions.map((q) => (
+                    <div key={q.id} className="space-y-2 animate-fade-in">
+                      <p className="text-sm font-medium text-zinc-200">{q.text}</p>
+                      {q.options ? (
+                        <div className="flex flex-wrap gap-2">
+                          {q.options.map((opt) => (
+                            <button
+                              key={opt}
+                              onClick={() => setQaAnswers(prev => ({ ...prev, [q.id]: opt }))}
+                              className={`px-3 py-1.5 rounded-lg text-xs border transition-all ${qaAnswers[q.id] === opt ? 'bg-orange-500 text-white border-orange-500' : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700'}`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <input 
+                          type="text" 
+                          placeholder="Type your answer..."
+                          value={qaAnswers[q.id] || ''}
+                          onChange={(e) => setQaAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:border-orange-500/50 outline-none"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer Actions */}
+            {workflowStage !== 'analyzing' && (
+              <div className="p-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-end gap-3 shrink-0">
+                {workflowStage === 'plan_review' && !isPlanEditing && (
+                  <>
+                    <Button variant="secondary" onClick={() => setIsPlanEditing(true)}>Edit Plan</Button>
+                    <Button variant="primary" onClick={handlePlanApprove} disabled={isLoading}>
+                      {isLoading ? <Loader2 size={14} className="animate-spin" /> : 'Approve Plan'}
+                    </Button>
+                  </>
+                )}
+                {workflowStage === 'qa' && (
+                  <Button variant="primary" onClick={handleStartBuilding} disabled={isLoading}>
+                    {isLoading ? <Loader2 size={14} className="animate-spin" /> : 'Start Building'}
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
